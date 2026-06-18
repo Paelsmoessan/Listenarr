@@ -25,6 +25,11 @@ var realtimeLogSink = RealtimeLoggingExtensions.CreateListenarrRealtimeLogSink()
 var bootstrapFileSystem = new LocalFileSystem();
 var builder = ListenarrBuilderFactory.Create(args, realtimeLogSink, bootstrapFileSystem);
 
+// Enable Windows Service hosting (SCM start/stop handshake). No-op when run from
+// console or on Linux. Content root is already anchored to AppContext.BaseDirectory
+// by ListenarrBuilderFactory, so config/ resolves next to the exe under the service.
+builder.Host.UseWindowsService();
+
 builder.AddListenarrApiServices(bootstrapFileSystem);
 builder.Services.AddListenarrInfrastructureComposition(builder.Configuration, builder.Environment);
 
