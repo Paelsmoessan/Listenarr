@@ -269,6 +269,14 @@ artifacts/
 
 # Specific stray local publish/test path (ignore local machine publish artifacts)
 listenarr.api/UsersRobbieDocumentsGitHubListenarrpublish_test
+
+# Local build / deploy artifacts (this machine)
+.deploy-staging/
+distribution/
+listenarr.api/publish-service/
+
+# Local Claude working notes (not part of the fork)
+.claude/
 listenarr.api/UsersRobbieDocumentsGitHubListenarr*
 
 # Ignore generated frontend build output copied into API project wwwroot
