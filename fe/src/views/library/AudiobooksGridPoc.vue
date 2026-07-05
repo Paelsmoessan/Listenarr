@@ -23,11 +23,23 @@
           class="poc-row"
           :style="{ transform: `translateY(${vRow.start}px)`, height: rowHeight + 'px' }"
         >
-          <div v-for="book in rowItems(vRow.index)" :key="book.id" class="poc-tile">
+          <div
+            v-for="book in rowItems(vRow.index)"
+            :key="book.id"
+            class="poc-tile"
+            :class="'poc-status-' + status(book)"
+            tabindex="0"
+            @click="goToBook(book.id)"
+            @keydown.enter="goToBook(book.id)"
+          >
             <div class="poc-cover-box">
               <img class="poc-cover" :src="cover(book)" loading="lazy" @error="onImgError" />
+              <div class="poc-overlay">
+                <div class="poc-t" :title="book.title">{{ book.title }}</div>
+                <div class="poc-a">{{ (book.authors || []).map(safeText).join(', ') || 'Unknown Author' }}</div>
+              </div>
+              <div class="poc-status-bar" />
             </div>
-            <div class="poc-title" :title="book.title">{{ book.title }}</div>
           </div>
           <!-- keep last row left-aligned when it isn't full -->
           <div
@@ -43,14 +55,26 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { useRouter } from 'vue-router'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useLibraryStore } from '@/stores/library'
 import { useProtectedImages } from '@/composables/useProtectedImages'
 import { getPlaceholderUrl } from '@/utils/placeholder'
+import { safeText } from '@/utils/textUtils'
+import { computeAudiobookStatus } from '@/utils/audiobookStatus'
 import type { Audiobook } from '@/types'
 
+const router = useRouter()
 const libraryStore = useLibraryStore()
 const { getProtectedImageSrc } = useProtectedImages()
+const noDownloads = new Set<number>()
+
+function status(book: Audiobook): string {
+  return computeAudiobookStatus(book, noDownloads)
+}
+function goToBook(id: number) {
+  router.push(`/audiobooks/${id}`)
+}
 
 const books = computed(() => libraryStore.audiobooks)
 
@@ -65,8 +89,8 @@ function recalc() {
   const nextCols = Math.max(1, Math.floor((w - 24 + GAP) / (TILE_MIN + GAP)))
   const tileW = (w - 24 - GAP * (nextCols - 1)) / nextCols
   cols.value = nextCols
-  // square cover (aspect-ratio 1/1 = tileW tall) + ~40px for the title/gap
-  rowHeight.value = Math.round(tileW + 40)
+  // square cover (aspect-ratio 1/1 = tileW tall); title/author are overlaid on the cover
+  rowHeight.value = Math.round(tileW + 8)
 }
 
 const rowCount = computed(() => Math.ceil(books.value.length / cols.value))
@@ -104,15 +128,32 @@ function jumpToIndex(itemIndex: number) {
   rowVirtualizer.value.scrollToIndex(row, { align: 'start' })
 }
 
+const SCROLL_KEY = 'poc-grid-scroll'
 let ro: ResizeObserver | null = null
+
 onMounted(async () => {
   if (books.value.length === 0) await libraryStore.fetchLibrary()
   await nextTick()
   recalc()
   ro = new ResizeObserver(() => recalc())
   if (parentRef.value) ro.observe(parentRef.value)
+
+  // Restore scroll (saved when we last left). The virtualizer's total height is deterministic
+  // (rows * rowHeight, independent of image loading), so scrollToOffset lands exactly, no drift.
+  const saved = Number(sessionStorage.getItem(SCROLL_KEY) || 0)
+  if (saved > 0) {
+    await nextTick()
+    requestAnimationFrame(() => rowVirtualizer.value.scrollToOffset(saved))
+  }
 })
+
 onBeforeUnmount(() => {
+  // Save before we leave so returning restores the position (this view remounts, no keep-alive).
+  try {
+    sessionStorage.setItem(SCROLL_KEY, String(parentRef.value?.scrollTop ?? 0))
+  } catch {
+    /* ignore */
+  }
   ro?.disconnect()
   ro = null
 })
@@ -177,19 +218,27 @@ onBeforeUnmount(() => {
 .poc-tile {
   flex: 1 1 0;
   min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+  cursor: pointer;
+  border-radius: 8px;
+  outline: none;
+}
+.poc-tile:focus-visible {
+  box-shadow: 0 0 0 2px #7aa;
 }
 .poc-tile--pad {
   visibility: hidden;
 }
 .poc-cover-box {
+  position: relative;
   aspect-ratio: 1 / 1;
   width: 100%;
   background: #1b1b1b;
   border-radius: 8px;
   overflow: hidden;
+  transition: transform 0.1s;
+}
+.poc-tile:hover .poc-cover-box {
+  transform: translateY(-2px);
 }
 .poc-cover {
   width: 100%;
@@ -197,11 +246,47 @@ onBeforeUnmount(() => {
   object-fit: cover;
   display: block;
 }
-.poc-title {
+.poc-overlay {
+  position: absolute;
+  inset: auto 0 0 0;
+  padding: 8px 8px 10px;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.9), rgba(0, 0, 0, 0.55) 55%, rgba(0, 0, 0, 0));
+}
+.poc-t {
   font-size: 12px;
-  color: #ddd;
+  font-weight: 600;
+  color: #fff;
   line-height: 1.2;
   max-height: 2.4em;
   overflow: hidden;
+}
+.poc-a {
+  font-size: 11px;
+  color: #c9d3dd;
+  line-height: 1.2;
+  max-height: 1.2em;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.poc-status-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 4px;
+  background: transparent;
+}
+.poc-status-downloading .poc-status-bar {
+  background: #3498db;
+}
+.poc-status-no-file .poc-status-bar {
+  background: #e74c3c;
+}
+.poc-status-quality-mismatch .poc-status-bar {
+  background: #f39c12;
+}
+.poc-status-quality-match .poc-status-bar {
+  background: #2ecc71;
 }
 </style>
