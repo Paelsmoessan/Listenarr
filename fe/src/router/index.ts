@@ -46,6 +46,13 @@ const routes = [
     meta: { requiresAuth: true },
   },
   {
+    // Throwaway TanStack Virtual grid proof-of-concept (not linked in the UI; visit /poc-grid).
+    path: '/poc-grid',
+    name: 'poc-grid',
+    component: () => import('../views/library/AudiobooksGridPoc.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
     path: '/collection/:type/:name',
     name: 'collection',
     component: () => import('../views/library/CollectionView.vue'),

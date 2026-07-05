@@ -42,6 +42,7 @@
     "@material/material-color-utilities": "^0.4.0",
     "@microsoft/signalr": "^10.0.0",
     "@phosphor-icons/vue": "^2.2.1",
+    "@tanstack/vue-virtual": "^3.13.31",
     "@vueuse/core": "^14.3.0",
     "minimist": "^1.2.8",
     "pinia": "^3.0.4",
