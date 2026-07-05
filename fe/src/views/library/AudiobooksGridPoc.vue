@@ -1,18 +1,32 @@
 <!--
   TanStack Virtual grid PROOF OF CONCEPT (throwaway, route /poc-grid).
   Not wired into the real AudiobooksView. Demonstrates: virtualized multi-column grid over the real
-  library, covers in aspect-ratio boxes (reserve space -> no layout shift), and scrollToIndex (the
-  scroll-preservation primitive). New file only; fork-clean.
+  library for books AND authors/series groupings, real card skin, click-through to the real detail /
+  collection views, per-group scroll preservation via scrollToOffset. New file only; fork-clean.
 -->
 <template>
   <div class="poc-page">
     <div class="poc-toolbar">
       <h2>TanStack Virtual — Grid POC</h2>
-      <span class="poc-hint">{{ books.length }} books · {{ cols }} cols · {{ rowCount }} rows · rowH {{ rowHeight }}px · rendering {{ virtualRows.length }} rows</span>
+      <div class="poc-group">
+        <button
+          v-for="g in groups"
+          :key="g"
+          class="poc-btn"
+          :class="{ active: groupBy === g }"
+          @click="setGroup(g)"
+        >
+          {{ g }}
+        </button>
+      </div>
+      <span class="poc-hint">
+        {{ cells.length }} {{ groupBy }} · {{ cols }} cols · {{ rowCount }} rows · rendering
+        {{ virtualRows.length }} rows
+      </span>
       <span class="poc-spacer-flex" />
       <button class="poc-btn" @click="jumpToIndex(0)">Top</button>
-      <button class="poc-btn" @click="jumpToIndex(500)">Jump to #500</button>
-      <button class="poc-btn" @click="jumpToIndex(books.length - 1)">Bottom</button>
+      <button class="poc-btn" @click="jumpToIndex(500)">Jump 500</button>
+      <button class="poc-btn" @click="jumpToIndex(cells.length - 1)">Bottom</button>
     </div>
 
     <div ref="parentRef" class="poc-scroll">
@@ -24,26 +38,26 @@
           :style="{ transform: `translateY(${vRow.start}px)`, height: rowHeight + 'px' }"
         >
           <div
-            v-for="book in rowItems(vRow.index)"
-            :key="book.id"
+            v-for="cell in rowItems(vRow.index)"
+            :key="cell.key"
             class="poc-tile"
-            :class="'poc-status-' + status(book)"
+            :class="cell.kind === 'book' ? 'poc-status-' + cell.status : 'poc-tile--collection'"
             tabindex="0"
-            @click="goToBook(book.id)"
-            @keydown.enter="goToBook(book.id)"
+            @click="onCellClick(cell)"
+            @keydown.enter="onCellClick(cell)"
           >
             <div class="poc-cover-box">
-              <img class="poc-cover" :src="cover(book)" loading="lazy" @error="onImgError" />
+              <img class="poc-cover" :src="cell.cover" loading="lazy" @error="onImgError" />
               <div class="poc-overlay">
-                <div class="poc-t" :title="book.title">{{ book.title }}</div>
-                <div class="poc-a">{{ (book.authors || []).map(safeText).join(', ') || 'Unknown Author' }}</div>
+                <div class="poc-t" :title="cell.title">{{ cell.title }}</div>
+                <div class="poc-a">{{ cell.subtitle }}</div>
               </div>
-              <div class="poc-status-bar" />
+              <div v-if="cell.kind === 'book'" class="poc-status-bar" />
+              <div v-else class="poc-count-badge">{{ cell.count }}</div>
             </div>
           </div>
-          <!-- keep last row left-aligned when it isn't full -->
           <div
-            v-for="n in (cols - rowItems(vRow.index).length)"
+            v-for="n in cols - rowItems(vRow.index).length"
             :key="'pad' + n"
             class="poc-tile poc-tile--pad"
           />
@@ -59,41 +73,130 @@ import { useRouter } from 'vue-router'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useLibraryStore } from '@/stores/library'
 import { useProtectedImages } from '@/composables/useProtectedImages'
+import { buildApiPath } from '@/services/apiBase'
 import { getPlaceholderUrl } from '@/utils/placeholder'
 import { safeText } from '@/utils/textUtils'
 import { computeAudiobookStatus } from '@/utils/audiobookStatus'
 import type { Audiobook } from '@/types'
+
+type GroupBy = 'books' | 'authors' | 'series'
+type BookCell = {
+  kind: 'book'
+  key: string
+  id: number
+  title: string
+  subtitle: string
+  cover: string
+  status: string
+}
+type CollectionCell = {
+  kind: 'collection'
+  key: string
+  type: 'author' | 'series'
+  name: string
+  title: string
+  subtitle: string
+  cover: string
+  count: number
+}
+type GridCell = BookCell | CollectionCell
 
 const router = useRouter()
 const libraryStore = useLibraryStore()
 const { getProtectedImageSrc } = useProtectedImages()
 const noDownloads = new Set<number>()
 
+const groups: GroupBy[] = ['books', 'authors', 'series']
+const groupBy = ref<GroupBy>('books')
+
+const books = computed(() => libraryStore.audiobooks)
+
+function cover(book: Audiobook): string {
+  return getProtectedImageSrc(book.imageUrl, getPlaceholderUrl(), { size: 'grid' })
+}
+// Author image via the image endpoint by author name (backend resolves it).
+function authorCover(name: string): string {
+  return getProtectedImageSrc(
+    buildApiPath(`/images/${encodeURIComponent(name)}`),
+    getPlaceholderUrl(),
+    { size: 'grid' },
+  )
+}
 function status(book: Audiobook): string {
   return computeAudiobookStatus(book, noDownloads)
 }
-function goToBook(id: number) {
-  router.push(`/audiobooks/${id}`)
+function seriesNames(book: Audiobook): string[] {
+  const m = book.seriesMemberships
+  if (m && m.length) {
+    const out: string[] = []
+    const seen = new Set<string>()
+    for (const x of m) {
+      const n = (x.seriesName || '').trim()
+      if (n && !seen.has(n.toLowerCase())) {
+        seen.add(n.toLowerCase())
+        out.push(n)
+      }
+    }
+    if (out.length) return out
+  }
+  const legacy = (book.series || '').trim()
+  return legacy ? [legacy] : []
 }
 
-const books = computed(() => libraryStore.audiobooks)
+const cells = computed<GridCell[]>(() => {
+  if (groupBy.value === 'books') {
+    return books.value.map((b) => ({
+      kind: 'book',
+      key: 'b' + b.id,
+      id: b.id,
+      title: safeText(b.title),
+      subtitle: (b.authors || []).map(safeText).filter(Boolean).join(', ') || 'Unknown Author',
+      cover: cover(b),
+      status: status(b),
+    }))
+  }
+  const type: 'author' | 'series' = groupBy.value === 'authors' ? 'author' : 'series'
+  const map = new Map<string, { name: string; count: number; cover: string }>()
+  for (const b of books.value) {
+    const names =
+      groupBy.value === 'authors'
+        ? (b.authors || []).map(safeText).filter(Boolean)
+        : seriesNames(b)
+    for (const name of names.length ? names : ['Unknown']) {
+      const ex = map.get(name)
+      if (ex) ex.count++
+      else map.set(name, { name, count: 1, cover: cover(b) })
+    }
+  }
+  return [...map.values()]
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((g) => ({
+      kind: 'collection',
+      key: 'c' + g.name,
+      type,
+      name: g.name,
+      title: g.name,
+      subtitle: `${g.count} book${g.count === 1 ? '' : 's'}`,
+      cover: type === 'author' ? authorCover(g.name) : g.cover,
+      count: g.count,
+    }))
+})
 
 const parentRef = ref<HTMLElement | null>(null)
 const TILE_MIN = 170
 const GAP = 12
 const cols = ref(6)
-const rowHeight = ref(230)
+const rowHeight = ref(200)
 
 function recalc() {
   const w = parentRef.value?.clientWidth ?? 1200
   const nextCols = Math.max(1, Math.floor((w - 24 + GAP) / (TILE_MIN + GAP)))
   const tileW = (w - 24 - GAP * (nextCols - 1)) / nextCols
   cols.value = nextCols
-  // square cover (aspect-ratio 1/1 = tileW tall); title/author are overlaid on the cover
   rowHeight.value = Math.round(tileW + 8)
 }
 
-const rowCount = computed(() => Math.ceil(books.value.length / cols.value))
+const rowCount = computed(() => Math.ceil(cells.value.length / cols.value))
 
 const rowVirtualizer = useVirtualizer(
   computed(() => ({
@@ -107,13 +210,9 @@ const rowVirtualizer = useVirtualizer(
 const virtualRows = computed(() => rowVirtualizer.value.getVirtualItems())
 const totalHeight = computed(() => rowVirtualizer.value.getTotalSize())
 
-function rowItems(rowIndex: number): Audiobook[] {
+function rowItems(rowIndex: number): GridCell[] {
   const start = rowIndex * cols.value
-  return books.value.slice(start, start + cols.value)
-}
-
-function cover(book: Audiobook): string {
-  return getProtectedImageSrc(book.imageUrl, getPlaceholderUrl(), { size: 'grid' })
+  return cells.value.slice(start, start + cols.value)
 }
 
 function onImgError(e: Event) {
@@ -121,39 +220,60 @@ function onImgError(e: Event) {
   const ph = getPlaceholderUrl()
   if (img && img.src !== ph) img.src = ph
 }
-
+function onCellClick(cell: GridCell) {
+  if (cell.kind === 'book') router.push(`/audiobooks/${cell.id}`)
+  else router.push(`/collection/${cell.type}/${encodeURIComponent(cell.name)}`)
+}
 function jumpToIndex(itemIndex: number) {
-  const clamped = Math.max(0, Math.min(itemIndex, books.value.length - 1))
-  const row = Math.floor(clamped / cols.value)
-  rowVirtualizer.value.scrollToIndex(row, { align: 'start' })
+  const clamped = Math.max(0, Math.min(itemIndex, cells.value.length - 1))
+  rowVirtualizer.value.scrollToIndex(Math.floor(clamped / cols.value), { align: 'start' })
 }
 
-const SCROLL_KEY = 'poc-grid-scroll'
-let ro: ResizeObserver | null = null
+// Per-group scroll memory (keyed by grouping), demonstrating scrollToOffset restore.
+const SCROLL_KEY = 'poc-grid-scroll.'
+const GROUP_KEY = 'poc-grid-group'
+function saveScroll() {
+  try {
+    sessionStorage.setItem(SCROLL_KEY + groupBy.value, String(parentRef.value?.scrollTop ?? 0))
+  } catch {
+    /* ignore */
+  }
+}
+function restoreScroll() {
+  const saved = Number(sessionStorage.getItem(SCROLL_KEY + groupBy.value) || 0)
+  requestAnimationFrame(() => rowVirtualizer.value.scrollToOffset(saved > 0 ? saved : 0))
+}
+function setGroup(g: GroupBy) {
+  if (g === groupBy.value) return
+  saveScroll()
+  groupBy.value = g
+  try {
+    sessionStorage.setItem(GROUP_KEY, g)
+  } catch {
+    /* ignore */
+  }
+  nextTick(() => {
+    recalc()
+    restoreScroll()
+  })
+}
 
+let ro: ResizeObserver | null = null
 onMounted(async () => {
+  const savedGroup = sessionStorage.getItem(GROUP_KEY)
+  if (savedGroup === 'books' || savedGroup === 'authors' || savedGroup === 'series') {
+    groupBy.value = savedGroup
+  }
   if (books.value.length === 0) await libraryStore.fetchLibrary()
   await nextTick()
   recalc()
   ro = new ResizeObserver(() => recalc())
   if (parentRef.value) ro.observe(parentRef.value)
-
-  // Restore scroll (saved when we last left). The virtualizer's total height is deterministic
-  // (rows * rowHeight, independent of image loading), so scrollToOffset lands exactly, no drift.
-  const saved = Number(sessionStorage.getItem(SCROLL_KEY) || 0)
-  if (saved > 0) {
-    await nextTick()
-    requestAnimationFrame(() => rowVirtualizer.value.scrollToOffset(saved))
-  }
+  await nextTick()
+  restoreScroll()
 })
-
 onBeforeUnmount(() => {
-  // Save before we leave so returning restores the position (this view remounts, no keep-alive).
-  try {
-    sessionStorage.setItem(SCROLL_KEY, String(parentRef.value?.scrollTop ?? 0))
-  } catch {
-    /* ignore */
-  }
+  saveScroll()
   ro?.disconnect()
   ro = null
 })
@@ -178,6 +298,10 @@ onBeforeUnmount(() => {
   margin: 0;
   color: #eee;
 }
+.poc-group {
+  display: flex;
+  gap: 4px;
+}
 .poc-hint {
   color: #8aa;
   font-size: 12px;
@@ -193,9 +317,14 @@ onBeforeUnmount(() => {
   border-radius: 6px;
   cursor: pointer;
   font-size: 13px;
+  text-transform: capitalize;
 }
 .poc-btn:hover {
   border-color: #7aa;
+}
+.poc-btn.active {
+  border-color: #2ecc71;
+  color: #2ecc71;
 }
 .poc-scroll {
   flex: 1;
@@ -288,5 +417,21 @@ onBeforeUnmount(() => {
 }
 .poc-status-quality-match .poc-status-bar {
   background: #2ecc71;
+}
+.poc-count-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 11px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 </style>
