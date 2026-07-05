@@ -160,7 +160,11 @@ const cells = computed<GridCell[]>(() => {
   for (const b of books.value) {
     const names =
       groupBy.value === 'authors'
-        ? (b.authors || []).map(safeText).filter(Boolean)
+        ? // primary author only (authors[] can include narrators/translators as later entries),
+          // matching AudiobooksView's group-by-authors[0].
+          b.authors && b.authors.length
+          ? [safeText(b.authors[0])].filter(Boolean)
+          : []
         : seriesNames(b)
     for (const name of names.length ? names : ['Unknown']) {
       const ex = map.get(name)
