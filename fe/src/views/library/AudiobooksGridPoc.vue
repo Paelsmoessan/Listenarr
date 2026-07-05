@@ -35,7 +35,11 @@
           v-for="vRow in virtualRows"
           :key="vRow.index"
           class="poc-row"
-          :style="{ transform: `translateY(${vRow.start}px)`, height: rowHeight + 'px' }"
+          :style="{
+            transform: `translateY(${vRow.start}px)`,
+            height: rowHeight + 'px',
+            gap: GAP + 'px',
+          }"
         >
           <div
             v-for="cell in rowItems(vRow.index)"
@@ -47,8 +51,16 @@
             @keydown.enter="onCellClick(cell)"
           >
             <div class="poc-cover-box" :style="{ aspectRatio: isSeries ? '2 / 1' : '1 / 1' }">
-              <!-- series: fanned cover stack -->
+              <!-- series: blurred fill + fanned cover stack -->
               <template v-if="cell.kind === 'collection' && cell.type === 'series'">
+                <img
+                  v-if="cell.covers.length"
+                  class="poc-series-bg"
+                  :src="cell.covers[0]"
+                  alt=""
+                  aria-hidden="true"
+                  loading="lazy"
+                />
                 <div class="poc-series">
                   <div
                     v-for="(url, i) in cell.covers.slice(0, 8)"
@@ -67,10 +79,10 @@
                 <div v-if="cell.kind === 'book'" class="poc-status-bar" />
                 <div v-else class="poc-count-badge">{{ cell.count }}</div>
               </template>
-              <div class="poc-overlay">
-                <div class="poc-t" :title="cell.title">{{ cell.title }}</div>
-                <div class="poc-a">{{ cell.subtitle }}</div>
-              </div>
+            </div>
+            <div class="poc-caption">
+              <div class="poc-t" :title="cell.title">{{ cell.title }}</div>
+              <div class="poc-a">{{ cell.subtitle }}</div>
             </div>
           </div>
           <div
@@ -213,19 +225,24 @@ const cells = computed<GridCell[]>(() => {
 })
 
 const parentRef = ref<HTMLElement | null>(null)
-const GAP = 12
+const GAP = 28
+const CAPTION_H = 40 // must match .poc-caption height so the row gap stays exactly GAP
 const cols = ref(6)
 const rowHeight = ref(200)
 
 function recalc() {
   const w = parentRef.value?.clientWidth ?? 1200
-  const min = groupBy.value === 'series' ? 340 : 170
-  const nextCols = Math.max(1, Math.floor((w - 24 + GAP) / (min + GAP)))
-  const tileW = (w - 24 - GAP * (nextCols - 1)) / nextCols
+  // Mirrors Larr's `grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 20px` — packs
+  // as many 180px (series: 2 units) columns as fit, then grows them (flex:1 = 1fr) to fill evenly.
+  const min = groupBy.value === 'series' ? 360 : 180
+  const PAD = 80 // scroll container horizontal padding (40px each side)
+  const nextCols = Math.max(1, Math.floor((w - PAD + GAP) / (min + GAP)))
+  const tileW = (w - PAD - GAP * (nextCols - 1)) / nextCols
   cols.value = nextCols
-  // series tiles are 2:1 (half height), books/authors are 1:1
+  // series tiles are 2:1 (half height), books/authors are 1:1. Caption is a FIXED height so the
+  // leftover doesn't inflate the row gap; row gap then equals the column gap (GAP) => uniform.
   const boxH = groupBy.value === 'series' ? tileW / 2 : tileW
-  rowHeight.value = Math.round(boxH + 8)
+  rowHeight.value = Math.round(boxH + CAPTION_H + GAP)
 }
 
 const rowCount = computed(() => Math.ceil(cells.value.length / cols.value))
@@ -375,7 +392,7 @@ onBeforeUnmount(() => {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 12px;
+  padding: 12px 40px;
 }
 .poc-inner {
   position: relative;
@@ -395,6 +412,8 @@ onBeforeUnmount(() => {
   cursor: pointer;
   border-radius: 8px;
   outline: none;
+  display: flex;
+  flex-direction: column;
 }
 .poc-tile:focus-visible {
   box-shadow: 0 0 0 2px #7aa;
@@ -439,26 +458,38 @@ onBeforeUnmount(() => {
   object-fit: cover;
   display: block;
 }
-.poc-overlay {
+/* blurred, darkened fill so single/sparse series fill the 2:1 box (mimics series-single-bg) */
+.poc-series-bg {
   position: absolute;
-  inset: auto 0 0 0;
-  padding: 8px 8px 10px;
-  background: linear-gradient(to top, rgba(0, 0, 0, 0.9), rgba(0, 0, 0, 0.55) 55%, rgba(0, 0, 0, 0));
-  z-index: 15;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: blur(14px) brightness(0.5);
+  transform: scale(1.15);
+  z-index: 0;
 }
-.poc-t {
-  font-size: 12px;
-  font-weight: 600;
-  color: #fff;
-  line-height: 1.2;
-  max-height: 2.4em;
+.poc-caption {
+  height: 40px; /* must match CAPTION_H in script */
+  box-sizing: border-box;
+  padding: 6px 4px 0;
+  text-align: center;
   overflow: hidden;
 }
+.poc-t {
+  font-size: 13px;
+  font-weight: 600;
+  color: #eaeaea;
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .poc-a {
-  font-size: 11px;
-  color: #c9d3dd;
-  line-height: 1.2;
-  max-height: 1.2em;
+  font-size: 12px;
+  color: #99a3ad;
+  line-height: 1.3;
+  margin-top: 2px;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -500,5 +531,6 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   z-index: 18;
+  background: #2563eb;
 }
 </style>
