@@ -1,8 +1,8 @@
 <!--
   TanStack Virtual grid PROOF OF CONCEPT (throwaway, route /poc-grid).
-  Not wired into the real AudiobooksView. Demonstrates: virtualized multi-column grid over the real
-  library for books AND authors/series groupings, real card skin, click-through to the real detail /
-  collection views, per-group scroll preservation via scrollToOffset. New file only; fork-clean.
+  Not wired into the real AudiobooksView. Books/authors = square tiles; series = wide 2:1 tiles with
+  a fanned cover stack (mimics AudiobooksView's series look). Virtualized, per-group scroll preserved.
+  New file only; fork-clean.
 -->
 <template>
   <div class="poc-page">
@@ -46,14 +46,31 @@
             @click="onCellClick(cell)"
             @keydown.enter="onCellClick(cell)"
           >
-            <div class="poc-cover-box">
-              <img class="poc-cover" :src="cell.cover" loading="lazy" @error="onImgError" />
+            <div class="poc-cover-box" :style="{ aspectRatio: isSeries ? '2 / 1' : '1 / 1' }">
+              <!-- series: fanned cover stack -->
+              <template v-if="cell.kind === 'collection' && cell.type === 'series'">
+                <div class="poc-series">
+                  <div
+                    v-for="(url, i) in cell.covers.slice(0, 8)"
+                    :key="i"
+                    class="poc-series-item"
+                    :style="seriesCoverStyle(i, Math.min(cell.covers.length, 8))"
+                  >
+                    <img class="poc-series-img" :src="url" loading="lazy" @error="onImgError" />
+                  </div>
+                </div>
+                <div class="poc-count-badge">{{ cell.count }}</div>
+              </template>
+              <!-- books + authors: single cover -->
+              <template v-else>
+                <img class="poc-cover" :src="cellCover(cell)" loading="lazy" @error="onImgError" />
+                <div v-if="cell.kind === 'book'" class="poc-status-bar" />
+                <div v-else class="poc-count-badge">{{ cell.count }}</div>
+              </template>
               <div class="poc-overlay">
                 <div class="poc-t" :title="cell.title">{{ cell.title }}</div>
                 <div class="poc-a">{{ cell.subtitle }}</div>
               </div>
-              <div v-if="cell.kind === 'book'" class="poc-status-bar" />
-              <div v-else class="poc-count-badge">{{ cell.count }}</div>
             </div>
           </div>
           <div
@@ -96,7 +113,7 @@ type CollectionCell = {
   name: string
   title: string
   subtitle: string
-  cover: string
+  covers: string[]
   count: number
 }
 type GridCell = BookCell | CollectionCell
@@ -108,13 +125,13 @@ const noDownloads = new Set<number>()
 
 const groups: GroupBy[] = ['books', 'authors', 'series']
 const groupBy = ref<GroupBy>('books')
+const isSeries = computed(() => groupBy.value === 'series')
 
 const books = computed(() => libraryStore.audiobooks)
 
 function cover(book: Audiobook): string {
   return getProtectedImageSrc(book.imageUrl, getPlaceholderUrl(), { size: 'grid' })
 }
-// Author image via the image endpoint by author name (backend resolves it).
 function authorCover(name: string): string {
   return getProtectedImageSrc(
     buildApiPath(`/images/${encodeURIComponent(name)}`),
@@ -142,6 +159,9 @@ function seriesNames(book: Audiobook): string[] {
   const legacy = (book.series || '').trim()
   return legacy ? [legacy] : []
 }
+function cellCover(cell: GridCell): string {
+  return cell.kind === 'book' ? cell.cover : cell.covers[0] || getPlaceholderUrl()
+}
 
 const cells = computed<GridCell[]>(() => {
   if (groupBy.value === 'books') {
@@ -156,20 +176,26 @@ const cells = computed<GridCell[]>(() => {
     }))
   }
   const type: 'author' | 'series' = groupBy.value === 'authors' ? 'author' : 'series'
-  const map = new Map<string, { name: string; count: number; cover: string }>()
+  const map = new Map<string, { name: string; count: number; covers: string[] }>()
   for (const b of books.value) {
     const names =
       groupBy.value === 'authors'
-        ? // primary author only (authors[] can include narrators/translators as later entries),
-          // matching AudiobooksView's group-by-authors[0].
+        ? // primary author only (authors[] can include narrators/translators as later entries)
           b.authors && b.authors.length
           ? [safeText(b.authors[0])].filter(Boolean)
           : []
         : seriesNames(b)
     for (const name of names.length ? names : ['Unknown']) {
-      const ex = map.get(name)
-      if (ex) ex.count++
-      else map.set(name, { name, count: 1, cover: cover(b) })
+      let ex = map.get(name)
+      if (!ex) {
+        ex = { name, count: 0, covers: [] }
+        map.set(name, ex)
+      }
+      ex.count++
+      if (type === 'series') {
+        const c = cover(b)
+        if (ex.covers.length < 8 && c && !ex.covers.includes(c)) ex.covers.push(c)
+      }
     }
   }
   return [...map.values()]
@@ -181,23 +207,25 @@ const cells = computed<GridCell[]>(() => {
       name: g.name,
       title: g.name,
       subtitle: `${g.count} book${g.count === 1 ? '' : 's'}`,
-      cover: type === 'author' ? authorCover(g.name) : g.cover,
+      covers: type === 'author' ? [authorCover(g.name)] : g.covers,
       count: g.count,
     }))
 })
 
 const parentRef = ref<HTMLElement | null>(null)
-const TILE_MIN = 170
 const GAP = 12
 const cols = ref(6)
 const rowHeight = ref(200)
 
 function recalc() {
   const w = parentRef.value?.clientWidth ?? 1200
-  const nextCols = Math.max(1, Math.floor((w - 24 + GAP) / (TILE_MIN + GAP)))
+  const min = groupBy.value === 'series' ? 340 : 170
+  const nextCols = Math.max(1, Math.floor((w - 24 + GAP) / (min + GAP)))
   const tileW = (w - 24 - GAP * (nextCols - 1)) / nextCols
   cols.value = nextCols
-  rowHeight.value = Math.round(tileW + 8)
+  // series tiles are 2:1 (half height), books/authors are 1:1
+  const boxH = groupBy.value === 'series' ? tileW / 2 : tileW
+  rowHeight.value = Math.round(boxH + 8)
 }
 
 const rowCount = computed(() => Math.ceil(cells.value.length / cols.value))
@@ -219,6 +247,20 @@ function rowItems(rowIndex: number): GridCell[] {
   return cells.value.slice(start, start + cols.value)
 }
 
+// Fan the series covers horizontally across the 2:1 box (percentage-based, so it scales with tile
+// width). Each cover is a square = half the box width (100% of the box height); first cover on top.
+function seriesCoverStyle(index: number, count: number) {
+  const coverWpct = 50
+  const span = 100 - coverWpct
+  const spacing = count <= 1 ? 0 : span / (count - 1)
+  const left = count === 1 ? span / 2 : index * spacing
+  return {
+    left: `${left}%`,
+    width: `${coverWpct}%`,
+    zIndex: count === 1 ? 1 : Math.max(1, 100 - index),
+  }
+}
+
 function onImgError(e: Event) {
   const img = e.target as HTMLImageElement
   const ph = getPlaceholderUrl()
@@ -233,7 +275,6 @@ function jumpToIndex(itemIndex: number) {
   rowVirtualizer.value.scrollToIndex(Math.floor(clamped / cols.value), { align: 'start' })
 }
 
-// Per-group scroll memory (keyed by grouping), demonstrating scrollToOffset restore.
 const SCROLL_KEY = 'poc-grid-scroll.'
 const GROUP_KEY = 'poc-grid-group'
 function saveScroll() {
@@ -363,7 +404,6 @@ onBeforeUnmount(() => {
 }
 .poc-cover-box {
   position: relative;
-  aspect-ratio: 1 / 1;
   width: 100%;
   background: #1b1b1b;
   border-radius: 8px;
@@ -379,11 +419,32 @@ onBeforeUnmount(() => {
   object-fit: cover;
   display: block;
 }
+/* series fanned covers */
+.poc-series {
+  position: absolute;
+  inset: 0;
+}
+.poc-series-item {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 6px;
+  overflow: hidden;
+  box-shadow: rgba(17, 17, 17, 0.45) 4px 0 6px;
+}
+.poc-series-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
 .poc-overlay {
   position: absolute;
   inset: auto 0 0 0;
   padding: 8px 8px 10px;
   background: linear-gradient(to top, rgba(0, 0, 0, 0.9), rgba(0, 0, 0, 0.55) 55%, rgba(0, 0, 0, 0));
+  z-index: 15;
 }
 .poc-t {
   font-size: 12px;
@@ -409,6 +470,7 @@ onBeforeUnmount(() => {
   bottom: 0;
   height: 4px;
   background: transparent;
+  z-index: 16;
 }
 .poc-status-downloading .poc-status-bar {
   background: #3498db;
@@ -430,12 +492,13 @@ onBeforeUnmount(() => {
   height: 22px;
   padding: 0 6px;
   border-radius: 11px;
-  background: rgba(0, 0, 0, 0.7);
+  background: rgba(0, 0, 0, 0.72);
   color: #fff;
   font-size: 12px;
   font-weight: 600;
   display: flex;
   align-items: center;
   justify-content: center;
+  z-index: 18;
 }
 </style>
