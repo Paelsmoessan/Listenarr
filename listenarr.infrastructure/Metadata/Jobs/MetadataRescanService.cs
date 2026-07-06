@@ -17,6 +17,7 @@
  */
 using AsyncKeyedLock;
 using Listenarr.Domain.Common;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -53,7 +54,20 @@ namespace Listenarr.Infrastructure.Metadata.Jobs
         {
             using var scope = scopeFactory.CreateScope();
             var fileRepository = scope.ServiceProvider.GetRequiredService<IAudiobookFileRepository>();
-            var candidates = await fileRepository.GetMissingMetadataAsync(20, cancellationToken);
+
+            // #737: how many missing-metadata files to re-probe per 5-minute cycle. Configurable so a
+            // large backlog (e.g. files imported before ffprobe was ready) can be healed faster.
+            // Config: "Listenarr:MetadataRescanBatchSize" (appsettings) or env
+            // LISTENARR_METADATA_RESCAN_BATCH_SIZE. Default 20; clamped 1..1000.
+            var configuration = scope.ServiceProvider.GetRequiredService<IConfiguration>();
+            var configuredBatch = configuration.GetValue<int?>("Listenarr:MetadataRescanBatchSize");
+            if (!configuredBatch.HasValue
+                && int.TryParse(Environment.GetEnvironmentVariable("LISTENARR_METADATA_RESCAN_BATCH_SIZE"), out var envBatch))
+            {
+                configuredBatch = envBatch;
+            }
+            var batchSize = Math.Clamp(configuredBatch ?? 20, 1, 1000);
+            var candidates = await fileRepository.GetMissingMetadataAsync(batchSize, cancellationToken);
 
             if (candidates.Any())
             {
