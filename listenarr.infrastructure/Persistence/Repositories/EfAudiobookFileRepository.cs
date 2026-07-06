@@ -43,20 +43,15 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
 
         public async Task<List<AudiobookFile>> GetMissingMetadataAsync(int max, CancellationToken ct = default)
         {
-            // #737: also treat codec/bitrate-missing and zero-duration rows as "missing metadata".
-            // Download-imported files can be persisted with DurationSeconds=0.0 (not null) and null
-            // Codec/Bitrate when ffprobe wasn't ready at import time; without these clauses the rescan
-            // job never re-probes them, so they stay quality-unknown forever.
-            // #737: select files still missing metadata (the WHERE naturally excludes already-healed
-            // files each cycle, so completed work is never re-processed). Codec/Bitrate are the
-            // quality-critical fields the download-import path can leave null; the original
-            // Duration/Format/SampleRate clauses are kept. NOTE: do NOT match on DurationSeconds == 0 -
-            // duration is stored as 0 across essentially the whole library, so that clause would select
-            // every file and turn a ~1.7k-file backfill into a full-library churn. Order the genuinely
-            // quality-broken rows (null Codec/Bitrate) first so they heal before cosmetic gaps.
+            // Select files still missing metadata. A zero DurationSeconds is treated the SAME as null: an
+            // audio file is never legitimately 0 seconds, so both mean "not probed". This was previously
+            // excluded to avoid churning the whole library, but that risk is gone now that the extraction
+            // bugs are fixed (#737 culture parse + redaction): a re-probe now populates the real duration,
+            // so each file heals once and drops out of this predicate instead of matching forever. The job
+            // self-drains. Codec/Bitrate ordered first so genuinely quality-broken rows heal before the rest.
             return await _db.AudiobookFiles
                 .AsNoTracking()
-                .Where(f => f.DurationSeconds == null
+                .Where(f => f.DurationSeconds == null || f.DurationSeconds == 0
                          || f.Format == null || f.SampleRate == null
                          || f.Codec == null || f.Bitrate == null)
                 .OrderByDescending(f => f.Codec == null)
