@@ -47,12 +47,21 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
             // Download-imported files can be persisted with DurationSeconds=0.0 (not null) and null
             // Codec/Bitrate when ffprobe wasn't ready at import time; without these clauses the rescan
             // job never re-probes them, so they stay quality-unknown forever.
+            // #737: select files still missing metadata (the WHERE naturally excludes already-healed
+            // files each cycle, so completed work is never re-processed). Codec/Bitrate are the
+            // quality-critical fields the download-import path can leave null; the original
+            // Duration/Format/SampleRate clauses are kept. NOTE: do NOT match on DurationSeconds == 0 -
+            // duration is stored as 0 across essentially the whole library, so that clause would select
+            // every file and turn a ~1.7k-file backfill into a full-library churn. Order the genuinely
+            // quality-broken rows (null Codec/Bitrate) first so they heal before cosmetic gaps.
             return await _db.AudiobookFiles
                 .AsNoTracking()
-                .Where(f => f.DurationSeconds == null || f.DurationSeconds == 0
+                .Where(f => f.DurationSeconds == null
                          || f.Format == null || f.SampleRate == null
                          || f.Codec == null || f.Bitrate == null)
-                .OrderBy(f => f.Id)
+                .OrderByDescending(f => f.Codec == null)
+                .ThenByDescending(f => f.Bitrate == null)
+                .ThenBy(f => f.Id)
                 .Take(max)
                 .ToListAsync(ct);
         }
