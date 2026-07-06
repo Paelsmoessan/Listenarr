@@ -110,6 +110,10 @@ namespace Listenarr.Infrastructure.Metadata.Jobs
                             file.Size = fi.Exists ? fi.Length : file.Size;
                             file.DurationSeconds = Math.Abs(meta.Duration.TotalSeconds) > double.Epsilon ? meta.Duration.TotalSeconds : file.DurationSeconds;
                             file.Format = !string.IsNullOrEmpty(meta.Format) ? meta.Format : file.Format;
+                            // #737: Codec + Container were never written here, so re-probed files stayed
+                            // codec-null. Populate them (same "only overwrite when probe returned a value" guard).
+                            file.Codec = !string.IsNullOrEmpty(meta.Codec) ? meta.Codec : file.Codec;
+                            file.Container = !string.IsNullOrEmpty(meta.Container) ? meta.Container : file.Container;
                             file.Bitrate = meta.BitRate != 0 ? meta.BitRate : file.Bitrate;
                             file.SampleRate = meta.SampleRate != 0 ? meta.SampleRate : file.SampleRate;
                             file.Channels = meta.Channels != 0 ? meta.Channels : file.Channels;

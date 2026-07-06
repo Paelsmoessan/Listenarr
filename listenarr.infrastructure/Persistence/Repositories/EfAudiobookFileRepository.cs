@@ -43,9 +43,15 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
 
         public async Task<List<AudiobookFile>> GetMissingMetadataAsync(int max, CancellationToken ct = default)
         {
+            // #737: also treat codec/bitrate-missing and zero-duration rows as "missing metadata".
+            // Download-imported files can be persisted with DurationSeconds=0.0 (not null) and null
+            // Codec/Bitrate when ffprobe wasn't ready at import time; without these clauses the rescan
+            // job never re-probes them, so they stay quality-unknown forever.
             return await _db.AudiobookFiles
                 .AsNoTracking()
-                .Where(f => f.DurationSeconds == null || f.Format == null || f.SampleRate == null)
+                .Where(f => f.DurationSeconds == null || f.DurationSeconds == 0
+                         || f.Format == null || f.SampleRate == null
+                         || f.Codec == null || f.Bitrate == null)
                 .OrderBy(f => f.Id)
                 .Take(max)
                 .ToListAsync(ct);

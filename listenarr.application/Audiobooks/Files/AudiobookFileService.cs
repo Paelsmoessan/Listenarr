@@ -152,7 +152,14 @@ namespace Listenarr.Application.Audiobooks.Files
 
                 try
                 {
-                    var needRetry = meta == null || (meta.Duration == TimeSpan.Zero && string.IsNullOrEmpty(meta.Format));
+                    // #737: also retry when the probe came back partial (codec/bitrate/duration missing),
+                    // not just fully empty. Download-import can run before ffprobe is ready, yielding a
+                    // row with null Codec/Bitrate and zero Duration that previously slipped through.
+                    var needRetry = meta == null
+                        || meta.Duration == TimeSpan.Zero
+                        || string.IsNullOrEmpty(meta.Format)
+                        || string.IsNullOrEmpty(meta.Codec)
+                        || (meta.BitRate ?? 0) == 0;
                     if (needRetry)
                     {
                         var installTask = ffmpegService.EnsureFfprobeInstalledAsync();
