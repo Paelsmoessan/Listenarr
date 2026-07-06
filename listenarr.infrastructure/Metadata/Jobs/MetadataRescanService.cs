@@ -27,9 +27,17 @@ namespace Listenarr.Infrastructure.Metadata.Jobs
     public class MetadataRescanService(
         ILogger<MetadataRescanService> logger,
         IMetadataRescanProcessor processor,
-        IWorkerCycleRunner cycleRunner) : BackgroundService
+        IWorkerCycleRunner cycleRunner,
+        IConfiguration configuration) : BackgroundService
     {
-        private static readonly TimeSpan Interval = TimeSpan.FromMinutes(5);
+        // #737: interval read fresh each cycle (via the intervalProvider Func) so it can be tuned
+        // without a rebuild/restart - e.g. speed up healing during testing. Config:
+        // "Listenarr:MetadataRescanIntervalMinutes" (appsettings/env). Default 5, clamped 0.1..1440.
+        private TimeSpan GetInterval()
+        {
+            var minutes = configuration.GetValue<double?>("Listenarr:MetadataRescanIntervalMinutes") ?? 5.0;
+            return TimeSpan.FromMinutes(Math.Clamp(minutes, 0.1, 1440));
+        }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
@@ -37,7 +45,7 @@ namespace Listenarr.Infrastructure.Metadata.Jobs
             await cycleRunner.RunPeriodicAsync(
                 nameof(MetadataRescanService),
                 initialDelay: null,
-                intervalProvider: () => Interval,
+                intervalProvider: GetInterval,
                 runCycle: processor.RunCycleAsync,
                 stoppingToken);
             logger.LogInformation("MetadataRescanService stopping");

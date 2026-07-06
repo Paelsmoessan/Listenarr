@@ -47,7 +47,8 @@ internal static class MetadataRegistrationExtensions
                 provider.GetRequiredService<IHttpClientFactory>().CreateClient("Ffmpeg"),
                 provider.GetRequiredService<IStartupConfigService>(),
                 provider.GetRequiredService<IProcessRunner>(),
-                provider.GetRequiredService<IApplicationPathService>()));
+                provider.GetRequiredService<IApplicationPathService>(),
+                provider.GetRequiredService<IConfiguration>()));
         return services;
     }
 

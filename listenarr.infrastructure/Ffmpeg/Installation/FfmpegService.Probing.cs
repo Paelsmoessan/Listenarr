@@ -4,6 +4,7 @@
  */
 using System.Diagnostics;
 using System.Text.Json;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Listenarr.Domain.Common;
 
@@ -56,10 +57,18 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
                 startInfo.ArgumentList.Add("-show_streams");
                 startInfo.ArgumentList.Add(safeFilePath);
 
-                var pr = await _processRunner.RunAsync(startInfo, 10000);
-                _logger.LogInformation("ffprobe exit code {Code} for file {File}; stderr length={Len}", pr.ExitCode, sanitizedFilePath, pr.Stderr?.Length ?? 0);
+                var timeoutMs = GetProbeTimeoutMs();
+                var pr = await _processRunner.RunAsync(startInfo, timeoutMs);
+                _logger.LogInformation("ffprobe exit code {Code} for file {File}; stderr length={Len}; timedOut={TimedOut}", pr.ExitCode, sanitizedFilePath, pr.Stderr?.Length ?? 0, pr.TimedOut);
 
-                if (pr.ExitCode > 0)
+                if (pr.TimedOut)
+                {
+                    // #737 Bug B: a timeout returns ExitCode -1. Surface it distinctly so it is not
+                    // mislabeled a JSON parse failure and so quarantine/backoff can treat it differently.
+                    throw new FfmpegException($"ffprobe timed out after {timeoutMs}ms for {sanitizedFilePath}");
+                }
+
+                if (pr.ExitCode != 0)
                 {
                     throw new FfmpegException($"ffprobe cannot read/process {sanitizedFilePath}");
                 }
@@ -112,6 +121,14 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
             }
 
             return string.Empty;
+        }
+
+        // #737: probe timeout in ms, read fresh from config each probe (no rebuild/restart to tune).
+        // Config: "Listenarr:FfprobeTimeoutMs" (appsettings/env). Default 10000, clamped 1000..600000.
+        private int GetProbeTimeoutMs()
+        {
+            var configured = _configuration?.GetValue<int?>("Listenarr:FfprobeTimeoutMs");
+            return Math.Clamp(configured ?? 10000, 1000, 600000);
         }
     }
 }

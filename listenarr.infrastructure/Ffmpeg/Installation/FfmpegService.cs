@@ -17,6 +17,7 @@
  */
 using System.Security.Cryptography;
 using System.Runtime.InteropServices;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.Ffmpeg.Installation
@@ -33,15 +34,19 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
         private readonly FfprobeGithubAssetDiscoverer _githubAssetDiscoverer;
         // Allow disabling auto-download via environment variable
         private readonly bool _autoInstall;
+        // #737: probe timeout is read fresh per probe so it can be tuned without a rebuild.
+        private readonly IConfiguration? _configuration;
 
         public FfmpegService(
             ILogger<FfmpegService> logger,
             HttpClient httpClient,
             IStartupConfigService startupConfigService,
             IProcessRunner processRunner,
-            IApplicationPathService applicationPathService)
+            IApplicationPathService applicationPathService,
+            IConfiguration? configuration = null)
         {
             _logger = logger;
+            _configuration = configuration;
             _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
             // Use a longer timeout than HttpClient's 100s default because static ffprobe archives
             // can be large and hosts may have slow links. Allow override via environment variable.
