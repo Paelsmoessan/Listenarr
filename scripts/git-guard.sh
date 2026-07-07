@@ -19,12 +19,12 @@ deny() {
 # anywhere in the line — so 'git commit -m "...cherry-pick..."' is NOT blocked, only 'git cherry-pick'.
 
 # 1. raw cherry-pick — caused cross-base conflicts. Force the extract-fix path.
-if printf '%s' "$input" | grep -qiE '\bgit[[:space:]]+(-[^[:space:]]+[[:space:]]+)*cherry-pick\b'; then
+if printf '%s' "$input" | grep -qiE '\bgit[[:space:]]+((-[cC][[:space:]]+[^[:space:]]+|-[^[:space:]]+)[[:space:]]+)*cherry-pick\b'; then
   deny "Blocked: raw git cherry-pick in this repo (it caused cross-base conflicts on 2026-07-06). To move a fix onto a contrib branch use scripts/extract-fix.ps1 <files...> which copies ONLY the named files."
 fi
 
 # 2. raw rebase — no rebasing across divergent bases.
-if printf '%s' "$input" | grep -qiE '\bgit[[:space:]]+(-[^[:space:]]+[[:space:]]+)*rebase\b'; then
+if printf '%s' "$input" | grep -qiE '\bgit[[:space:]]+((-[cC][[:space:]]+[^[:space:]]+|-[^[:space:]]+)[[:space:]]+)*rebase\b'; then
   deny "Blocked: raw git rebase in this repo. Contrib branches are cut fresh from upstream-canary via scripts/new-contrib-branch.ps1 - no rebasing across divergent bases."
 fi
 
