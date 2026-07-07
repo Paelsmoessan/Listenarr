@@ -4,6 +4,22 @@
 
 _(none open)_
 
+## Dev Tooling
+- **Split the deploy script into frontend-only / backend-only / both.** `scripts/update-from-upstream.ps1`
+  currently rebuilds and swaps FE+BE every time, which is slow for incremental changes. Separate targets
+  (deploy FE only via `npm run build` + robocopy `fe/dist` -> `wwwroot`, no restart; deploy BE only =
+  `dotnet build` + swap bin + restart; and "both") would speed up the test loop a lot.
+
+## Fork Maintenance (method to define)
+- **Establish a repeatable method to develop on our fork while pulling/merging only the upstream changes
+  we want** (not full rebases of everything). Today's #731 pain came from base divergence: our fork
+  `canary` carries lots of fork-only work (Windows service, updater script, cover pipeline), so any branch
+  based on it drags all of that into an upstream PR (the 24-file bloat), and cherry-picking across the
+  divergent bases conflicts. Need a clean model, e.g.: feature branches for upstream PRs cut from
+  `upstream/canary` (not fork canary); fork-only infra kept isolated/toggleable; a documented flow for
+  taking specific upstream PRs (like #676) without pulling the whole tree. Plan it fresh, it's the root
+  cause of most of the friction.
+
 ## Fixed
 
 ### Sidebar nav: sub-branch items don't react until the parent top node is hovered
