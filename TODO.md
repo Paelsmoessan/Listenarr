@@ -2,7 +2,13 @@
 
 ## Known Bugs
 
-_(none open)_
+- **EF migration drift in our fork's DB (surfaced by upstream PR #727).** Upstream found two migrations were
+  never discovered by EF, so real installs (ours included) are missing `MoveJobs.SourcePath` and the entire
+  `ProcessExecutionLogs` table. Symptom if it bites: `SQLite Error: no such column: m.SourcePath` or
+  `no such table: ProcessExecutionLogs`. Fix path = adopt upstream #727 (restores the Designer + adds the
+  `AddProcessExecutionLogs` migration; heals on next startup) or its approach. NOT yet verified on our DB, not
+  pulled. Decision 2026-07-07: "we do us, they do them" — parked; pull if/when it actually bites. Quick check:
+  `'/c/sqlite/sqlite3.exe' <db> "SELECT name FROM sqlite_master WHERE name='ProcessExecutionLogs';"` (empty = drifted).
 
 ## Dev Tooling
 - **Split the deploy script into frontend-only / backend-only / both.** `scripts/update-from-upstream.ps1`
@@ -10,15 +16,16 @@ _(none open)_
   (deploy FE only via `npm run build` + robocopy `fe/dist` -> `wwwroot`, no restart; deploy BE only =
   `dotnet build` + swap bin + restart; and "both") would speed up the test loop a lot.
 
-## Fork Maintenance (method to define)
-- **Establish a repeatable method to develop on our fork while pulling/merging only the upstream changes
-  we want** (not full rebases of everything). Today's #731 pain came from base divergence: our fork
-  `canary` carries lots of fork-only work (Windows service, updater script, cover pipeline), so any branch
-  based on it drags all of that into an upstream PR (the 24-file bloat), and cherry-picking across the
-  divergent bases conflicts. Need a clean model, e.g.: feature branches for upstream PRs cut from
-  `upstream/canary` (not fork canary); fork-only infra kept isolated/toggleable; a documented flow for
-  taking specific upstream PRs (like #676) without pulling the whole tree. Plan it fresh, it's the root
-  cause of most of the friction.
+## Fork Maintenance — SOLVED 2026-07-07 (guarded branch workflow)
+- Built the guarded single-fork branch model that fixes the #731 base-divergence pain: `upstream-canary`
+  local mirror = clean base; author/verify on `canary`, then `scripts/extract-fix.ps1 <files>` copies only
+  the fix files onto a branch cut via `scripts/new-contrib-branch.ps1` (off `upstream-canary`, never fat
+  canary). A PreToolUse hook (`scripts/git-guard.sh`) hard-blocks raw cherry-pick/rebase/wrong-base cuts so
+  it survives `/clear`. Full protocol in `CLAUDE.md`; rationale in
+  `.claude/plans/fork-contribution-workflow.md`. Committed c0390c6f + 37453ccb, pushed.
+- Open follow-ups: re-wire the hook on dev2 (`.claude/settings.json` is gitignored/local; the guard script
+  travels via the fork); real-world shakedown on the next actual upstream fix; cadence for pulling wanted
+  upstream changes back into `canary` (merge, not rebase) still to define.
 
 ## Fixed
 
