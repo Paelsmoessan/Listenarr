@@ -15,6 +15,13 @@
   currently rebuilds and swaps FE+BE every time, which is slow for incremental changes. Separate targets
   (deploy FE only via `npm run build` + robocopy `fe/dist` -> `wwwroot`, no restart; deploy BE only =
   `dotnet build` + swap bin + restart; and "both") would speed up the test loop a lot.
+- **Adapt the contribution scripts to the worktree restructure (2026-07-08).** Repo is now
+  container + `_DevFork` (canary) + `_Upstream` (upstream-canary). Two breakages to fix in
+  `new-contrib-branch.ps1`: (1) `git branch -f upstream-canary upstream/canary` now FAILS because
+  `upstream-canary` is permanently checked out in `_Upstream` — refresh via the worktree instead
+  (`git -C _Upstream fetch upstream; git -C _Upstream reset --hard upstream/canary`). (2) Contrib branches
+  should be cut/checked-out in the `_Upstream` worktree (so VERIFY can run them), not in the `_DevFork`
+  (canary) tree. See `.claude/plans/test-instances-harness.md` + `project_repo_worktree_layout` memory.
 
 ## Fork Maintenance — SOLVED 2026-07-07 (guarded branch workflow)
 - Built the guarded single-fork branch model that fixes the #731 base-divergence pain: `upstream-canary`
@@ -61,3 +68,16 @@
   (B) hash of a canonical provider key (normalized ASIN, else ISBN, else source URL), covers search
   results too. Touches frontend URL builders + backend resolution, so write a plan first. See
   `.claude/reason-notes.md` for the full data-flow trace.
+
+## Library Matching / Metadata Mapping
+- **Reclaim the ~1000 unmatched audiobooks.** Real books that Listenarr could not scrape/match, parked in
+  M:\ root folders (`_audiobook_cleanup`, `_ToBeDeleted`, `Uploaded` — leftovers from failed readarr /
+  lazylibrarian imports). Chris keeps them deliberately (they are library we do not otherwise have); the fix
+  is BETTER MATCHING, not deletion. This is the concrete motivation for improving the matcher.
+- Approaches (from vetted research + prior decisions):
+  - Matching robustness: bracket-stripping before title compare, single language-filter polarity,
+    duration-weighted match scoring (ABS-style 0.7 duration / 0.2 title / 0.1 author). Source:
+    `D:\_Development\Phonotheca\.claude\research\audible-matching-pitfalls\report.md`.
+  - Phonotheca provider for Listenarr: typo tolerance + relevance ranking that the current exact-spelling
+    search lacks (memory `project_phonotheca_metadata_provider`, `project_audiobook_metadata_server`).
+- Deliberately NOT starting yet; captured so it is not lost as the reason those chaotic folders stay.
