@@ -22,6 +22,16 @@
   (`git -C _Upstream fetch upstream; git -C _Upstream reset --hard upstream/canary`). (2) Contrib branches
   should be cut/checked-out in the `_Upstream` worktree (so VERIFY can run them), not in the `_DevFork`
   (canary) tree. See `.claude/plans/test-instances-harness.md` + `project_repo_worktree_layout` memory.
+- **Decide push handling for the worktree layout (DISCUSS, 2026-07-08).** Now that `_DevFork` (canary) and
+  `_Upstream` (contrib branches) are separate worktrees of one repo, settle: cadence for pushing `_DevFork`
+  canary -> `origin/canary` (fork backup) vs keeping it local; how contrib branches push from `_Upstream` ->
+  `origin` for PRs; and whether/what fork-only tooling commits (e.g. run-instance.ps1 `727620dc`) get pushed.
+  Not decided yet - flagged to discuss before the next push.
+- **Update Node.js (env, 2026-07-08).** Installed Node is `v20.18.1` (single install, `C:\Program Files\nodejs`).
+  The fe toolchain wants newer: Vite 8 requires `>=20.19 / 22.12` (prints an upgrade warning on every build),
+  and `fe` engines want `^24.15.0`. The FE still builds today (warning only), but it is a latent hard-fail risk
+  as deps bump their floor. Update to Node 22 LTS (or 24). Confirmed via the run-instance.ps1 FE build
+  2026-07-08 (see reason-notes "run-instance.ps1 FE build" chapter).
 
 ## Fork Maintenance — SOLVED 2026-07-07 (guarded branch workflow)
 - Built the guarded single-fork branch model that fixes the #731 base-divergence pain: `upstream-canary`

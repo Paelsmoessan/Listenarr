@@ -61,9 +61,28 @@ if (-not $BackendOnly) {
     Write-Host "[run-instance] building frontend ($fe)"
     Push-Location $fe
     try {
-        if (-not (Test-Path (Join-Path $fe 'node_modules'))) { npm ci }
-        # Windows rolldown native-binding workaround before the build.
-        npm install '@rolldown/binding-win32-x64-msvc' --no-save 2>$null
+        if (-not (Test-Path (Join-Path $fe 'node_modules'))) {
+            Write-Host "[run-instance] npm ci ..."
+            npm ci
+            if ($LASTEXITCODE -ne 0) { throw "npm ci failed" }
+        }
+        # Rolldown win32-x64 native-binding workaround (npm/cli#4828): npm ci silently skips the optional
+        # binding, so `npm run build` throws "Cannot find module './rolldown-binding.win32-x64-msvc.node'".
+        # Reinstall it version-matched with --force, but ONLY when the .node is actually missing (fast on
+        # repeat runs). Mirrors update-from-upstream.ps1.
+        $bindingDir = Join-Path $fe 'node_modules\@rolldown\binding-win32-x64-msvc'
+        if (-not (Get-ChildItem -Path $bindingDir -Filter *.node -ErrorAction SilentlyContinue)) {
+            $rolldownPkg = Join-Path $fe 'node_modules\rolldown\package.json'
+            if (Test-Path $rolldownPkg) {
+                $rolldownVer = (Get-Content $rolldownPkg -Raw | ConvertFrom-Json).version
+                Write-Host "[run-instance] restoring rolldown win32-x64 binding @ $rolldownVer ..."
+                npm install "@rolldown/binding-win32-x64-msvc@$rolldownVer" --no-save --force
+                if ($LASTEXITCODE -ne 0) { Write-Warning "binding reinstall returned non-zero; build may fail" }
+            }
+        } else {
+            Write-Host "[run-instance] rolldown binding already present."
+        }
+        Write-Host "[run-instance] npm run build ..."
         npm run build
         if ($LASTEXITCODE -ne 0) { throw "frontend build failed" }
     } finally { Pop-Location }
