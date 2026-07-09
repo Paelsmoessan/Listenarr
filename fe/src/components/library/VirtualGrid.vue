@@ -168,9 +168,10 @@ function rowCells(rowIndex: number): { item: T; index: number }[] {
   return out
 }
 
-// Self-contained scroll save/restore, when scrollKey is set. We save at exactly ONE moment — when the grid
-// unmounts (leaving to a detail, the sidebar, anywhere off the page) — and restore on mount. No per-frame
-// tracking: it isn't needed and was the source of the restore fighting the user and of stale/garbage saves.
+// Self-contained scroll save/restore, when scrollKey is set. We save at exactly ONE moment: when the user
+// leaves the grid to open a detail (the parent calls saveNow() from the click handler). No per-frame
+// tracking and no unmount save — neither is needed, and they were the source of the restore fighting the
+// user and of stale/garbage saves.
 const SCROLL_PREFIX = 'la-vg-scroll.'
 
 function saveScroll() {
@@ -184,11 +185,8 @@ function saveScroll() {
   }
 }
 
-// Restore lifecycle guards: userInteracted aborts an in-flight re-assert so it never fights the user;
-// disposed + restoreRaf let us cancel the loop on unmount so we never scroll a torn-down virtualizer.
+// Any real user input aborts an in-flight restore re-assert, so it can never fight the user.
 let userInteracted = false
-let disposed = false
-let restoreRaf = 0
 function onUserIntent() {
   userInteracted = true
 }
@@ -206,17 +204,16 @@ function restoreScroll() {
   if (saved <= 0) return
   // The virtualizer applies its new total height on a later async cycle, so an early scrollToOffset
   // CLAMPS a few rows short (the flaky "2-3 rows too high"). Re-assert each frame until scrollTop reaches
-  // the saved offset, bailing if the user grabs the scroll or the component unmounts mid-restore.
+  // the saved offset, aborting the instant the user grabs the scroll so it never fights them.
   userInteracted = false
   let tries = 0
   const apply = () => {
-    restoreRaf = 0
-    if (disposed || userInteracted) return
+    if (userInteracted) return
     rowVirtualizer.value.scrollToOffset(saved)
     tries += 1
     const got = parentRef.value?.scrollTop ?? 0
     if (Math.abs(got - saved) > 1 && tries < 12) {
-      restoreRaf = requestAnimationFrame(apply)
+      requestAnimationFrame(apply)
     } else {
       vlog('restore:done ' + props.scrollKey, {
         want: saved,
@@ -227,7 +224,7 @@ function restoreScroll() {
       })
     }
   }
-  restoreRaf = requestAnimationFrame(apply)
+  requestAnimationFrame(apply)
 }
 
 let ro: ResizeObserver | null = null
@@ -251,14 +248,18 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   // Save on leaving the grid — covers EVERY exit (detail click, sidebar, any navigation off the page).
   saveScroll()
-  // Stop any in-flight restore re-assert so it can't scrollToOffset a torn-down virtualizer.
-  disposed = true
-  if (restoreRaf) cancelAnimationFrame(restoreRaf)
   parentRef.value?.removeEventListener('wheel', onUserIntent)
   parentRef.value?.removeEventListener('touchstart', onUserIntent)
   parentRef.value?.removeEventListener('keydown', onUserIntent)
   ro?.disconnect()
   ro = null
+})
+
+defineExpose({
+  scrollToOffset: (offset: number) => rowVirtualizer.value.scrollToOffset(offset),
+  scrollToIndex: (itemIndex: number, opts?: { align?: 'start' | 'center' | 'end' }) =>
+    rowVirtualizer.value.scrollToIndex(Math.floor(itemIndex / cols.value), opts),
+  getScrollOffset: () => parentRef.value?.scrollTop ?? 0,
 })
 </script>
 

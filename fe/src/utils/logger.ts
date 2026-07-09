@@ -89,7 +89,6 @@ export class Logger {
     try {
       const flag = localStorage.getItem('la-debug')
       if (flag === '1' || flag === '*') return true
-      if (flag === '0' || flag === 'false' || flag === 'off') return false // explicit off wins over isDev
       if (flag) return flag.split(',').some((n) => n.trim() === this.ns)
     } catch {
       /* localStorage may be unavailable */
