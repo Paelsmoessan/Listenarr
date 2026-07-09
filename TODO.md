@@ -32,6 +32,13 @@
   and `fe` engines want `^24.15.0`. The FE still builds today (warning only), but it is a latent hard-fail risk
   as deps bump their floor. Update to Node 22 LTS (or 24). Confirmed via the run-instance.ps1 FE build
   2026-07-08 (see reason-notes "run-instance.ps1 FE build" chapter).
+- **Test-instance shutdown control (2026-07-08).** While testing via the browser there's no obvious way to
+  stop the running exe. Today: Ctrl+C in the launching console (run-instance.ps1's finally stops the app) or
+  close that console. Wanted, two options: (a) a `stop-instance.ps1 -Role Dev|Verify` helper that kills the
+  instance by port / content-root (pure tooling, zero product code) - the quick win; (b) Chris's idea: an
+  in-app Shutdown button in the UI, gated to TEST instances ONLY (e.g. a LISTENARR_TEST_MODE flag / non-4545
+  port), never on LIVE - nicer UX but it's fork product code + must be hard-gated so it can never appear on
+  the live 4545 service.
 
 ## Fork Maintenance — SOLVED 2026-07-07 (guarded branch workflow)
 - Built the guarded single-fork branch model that fixes the #731 base-divergence pain: `upstream-canary`
