@@ -400,6 +400,139 @@
       </div>
     </div>
 
+    <!-- NEW (flagged): TanStack VirtualGrid , books GRID mode. Original scroller = fallback (below). -->
+    <VirtualGrid
+      v-else-if="useVirtualGrid && viewMode === 'grid'"
+      :items="audiobooks"
+      :item-key="(a) => a.id"
+      :gap="20"
+      :min-item-width="180"
+      :aspect-ratio="1"
+      :extra-height="showItemDetails ? gridExtraHeight : 0"
+      :scroll-key="`books-${groupBy}`"
+      :class="['audiobooks-scroll-container', { 'has-selection': selectedCount > 0 }]"
+    >
+      <template #default="{ item: audiobook }">
+        <div class="audiobook-wrapper">
+          <div
+            tabindex="0"
+            @keydown.enter="navigateToDetail(audiobook.id)"
+            class="audiobook-item"
+            :class="{
+              selected: libraryStore.isSelected(audiobook.id),
+              'status-no-file': getAudiobookStatus(audiobook) === 'no-file',
+              'status-downloading': getAudiobookStatus(audiobook) === 'downloading',
+              'status-quality-mismatch': getAudiobookStatus(audiobook) === 'quality-mismatch',
+              'status-quality-match': getAudiobookStatus(audiobook) === 'quality-match',
+            }"
+            @click="navigateToDetail(audiobook.id)"
+          >
+            <div class="row-click-target" @click="navigateToDetail(audiobook.id)" />
+            <div
+              class="selection-checkbox"
+              @click.stop="handleCheckboxClick(audiobook, $event)"
+              @mousedown.prevent
+            >
+              <input
+                type="checkbox"
+                :checked="libraryStore.isSelected(audiobook.id)"
+                @change="onCheckboxChange(audiobook, $event)"
+                @keydown.space.prevent="handleCheckboxKeydown(audiobook, $event)"
+              />
+            </div>
+            <div class="audiobook-poster-container" :class="{ 'show-details': showItemDetails }">
+              <div
+                class="audiobook-image-placeholder"
+                :class="{ loaded: isImageLoaded(getBookImageKey(audiobook)) }"
+              >
+                <PhBookOpen class="audiobook-placeholder-icon" />
+              </div>
+              <img
+                :src="getProtectedImageSrc(getBookImageUrl(audiobook), getPlaceholderUrl(), { size: 'grid' })"
+                :alt="audiobook.title"
+                class="audiobook-poster cover-loading-image"
+                :class="{ loaded: isImageLoaded(getBookImageKey(audiobook)) }"
+                loading="lazy"
+                decoding="async"
+                @load="markImageLoaded(getBookImageKey(audiobook))"
+                @error="handleLazyImageError(getBookImageKey(audiobook), $event)"
+              />
+              <div class="status-overlay">
+                <div v-if="!showItemDetails" class="audiobook-title">
+                  {{ safeText(audiobook.title) }}
+                </div>
+                <div v-if="!showItemDetails" class="audiobook-author">
+                  {{
+                    audiobook.authors?.map((author) => safeText(author)).join(', ') || 'Unknown Author'
+                  }}
+                </div>
+                <div
+                  v-if="getQualityProfileName(audiobook.qualityProfileId)"
+                  class="quality-profile-badge"
+                >
+                  <PhStar />
+                  {{ getQualityProfileName(audiobook.qualityProfileId) }}
+                </div>
+                <div class="monitored-badge" :class="{ unmonitored: !audiobook.monitored }">
+                  <component :is="audiobook.monitored ? PhEye : PhEyeSlash" />
+                  {{ audiobook.monitored ? 'Monitored' : 'Unmonitored' }}
+                </div>
+              </div>
+              <div class="action-buttons">
+                <button
+                  class="action-btn edit-btn-small"
+                  @click.stop="openEditModal(audiobook)"
+                  title="Edit"
+                >
+                  <PhPencil />
+                </button>
+                <button
+                  class="action-btn delete-btn-small"
+                  @click.stop="confirmDelete(audiobook)"
+                  title="Delete"
+                >
+                  <PhTrash />
+                </button>
+              </div>
+            </div>
+            <div
+              v-if="showItemDetails"
+              class="grid-bottom-details la-vg-details"
+              :style="{ height: detailsBlockHeight + 'px' }"
+            >
+              <div class="detail-line title">{{ safeText(audiobook.title) }}</div>
+              <div class="detail-line small">
+                {{
+                  (audiobook.authors || [])
+                    .slice(0, 2)
+                    .map((a) => safeText(a))
+                    .join(', ') || 'Unknown Author'
+                }}
+                <div v-if="(audiobook.narrators || []).length">
+                  {{
+                    (audiobook.narrators || [])
+                      .slice(0, 1)
+                      .map((n) => safeText(n))
+                      .join(', ')
+                  }}
+                </div>
+              </div>
+              <div v-if="formatSeriesMemberships(audiobook)" class="detail-line small">
+                Series: {{ safeText(formatSeriesMemberships(audiobook)) }}
+              </div>
+              <div class="detail-line small">
+                {{ safeText(audiobook.publisher)
+                }}<span v-if="audiobook.publishYear">
+                  • {{ safeText(audiobook.publishYear?.toString?.() ?? '') }}</span
+                >
+              </div>
+              <div class="detail-line small">{{ statusText(getAudiobookStatus(audiobook)) }}</div>
+            </div>
+          </div>
+        </div>
+      </template>
+    </VirtualGrid>
+
     <div
       v-else
       ref="scrollContainer"
@@ -811,6 +944,7 @@ import {
   PhBooks,
   PhFolderOpen,
 } from '@phosphor-icons/vue'
+import VirtualGrid from '@/components/library/VirtualGrid.vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useLibraryStore } from '@/stores/library'
 import { useConfigurationStore } from '@/stores/configuration'
@@ -818,7 +952,7 @@ import { useRootFoldersStore } from '@/stores/rootFolders'
 import { useDownloadsStore } from '@/stores/downloads'
 import { apiService } from '@/services/api'
 import { buildApiPath } from '@/services/apiBase'
-import { logger } from '@/utils/logger'
+import { logger, createLogger } from '@/utils/logger'
 import BulkEditModal from '@/components/domain/collection/BulkEditModal.vue'
 import EditAudiobookModal from '@/components/domain/audiobook/EditAudiobookModal.vue'
 import RenamePreviewModal from '@/components/domain/organize/RenamePreviewModal.vue'
@@ -1665,11 +1799,52 @@ function recalcItemsPerRow() {
 // Option: show extra details under each audiobook poster in grid view
 const SHOW_ITEM_DETAILS_KEY = 'listenarr.showItemDetails'
 const showItemDetails = ref<boolean>(false)
+// Flag: sideloaded TanStack VirtualGrid (fallback = original hand-rolled scroller). Toggle in devtools:
+// localStorage.setItem('la-virtualgrid','1'); reload. Default OFF.
+const useVirtualGrid = ref<boolean>(localStorage.getItem('la-virtualgrid') === '1')
 
 try {
   const stored = localStorage.getItem(SHOW_ITEM_DETAILS_KEY)
   if (stored !== null) showItemDetails.value = stored === 'true'
 } catch {}
+
+// --- VirtualGrid info-ON uniform details height -------------------------------------------------
+// The info-ON details block has a VARIABLE line count (title + author + narrator? + series? +
+// publisher/year + status = 4..6 lines). VirtualGrid needs a deterministic uniform row height, so we
+// reserve the WHOLE LIBRARY's worst-case line count (Chris 2026-07-09) and pin every info-ON card to it.
+// Each line is forced single-line in CSS (.la-vg-details), so height is a pure function of line COUNT.
+const DETAIL_LINE_H = 15 // px per detail line; MUST match --? line-height in .la-vg-details CSS
+const DETAIL_TITLE_MB = 4 // .detail-line.title margin-bottom (kept from existing CSS)
+const DETAILS_MARGIN_TOP = 8 // .grid-bottom-details margin-top (gap between poster and details)
+const maxDetailLines = computed(() => {
+  let max = 4 // title + author + publisher/year + status are always present
+  for (const a of libraryStore.audiobooks || []) {
+    const lines =
+      4 + ((a.narrators?.length ?? 0) > 0 ? 1 : 0) + (formatSeriesMemberships(a) ? 1 : 0)
+    if (lines > max) max = lines
+  }
+  return max // 4..6
+})
+const detailsBlockHeight = computed(() => maxDetailLines.value * DETAIL_LINE_H + DETAIL_TITLE_MB)
+const gridExtraHeight = computed(() => DETAILS_MARGIN_TOP + detailsBlockHeight.value)
+// Verbose diagnostics (Chris asked 2026-07-09): what extra-height VirtualGrid actually receives + when.
+const vgLog = createLogger('VG/AV')
+watch(
+  [showItemDetails, useVirtualGrid, maxDetailLines, detailsBlockHeight, gridExtraHeight],
+  () => {
+    if (!useVirtualGrid.value) return
+    vgLog.debug('inputs', {
+      showItemDetails: showItemDetails.value,
+      maxDetailLines: maxDetailLines.value,
+      detailsBlockHeight: detailsBlockHeight.value,
+      gridExtraHeight: gridExtraHeight.value,
+      extraHeightSentToGrid: showItemDetails.value ? gridExtraHeight.value : 0,
+      libraryCount: (libraryStore.audiobooks || []).length,
+    })
+  },
+  { immediate: true },
+)
+// -----------------------------------------------------------------------------------------------
 
 watch(showItemDetails, (v) => {
   try {
@@ -3602,6 +3777,20 @@ defineExpose({
   color: #fff;
   font-weight: 500;
   margin-bottom: 4px;
+}
+/* VirtualGrid path ONLY: pin info-ON details to a data-derived FIXED height (height bound inline from
+   detailsBlockHeight) with one line per row, so every info-ON card is uniform and VirtualGrid's
+   deterministic row height is exact. The fallback scroller keeps the plain (variable) .grid-bottom-details.
+   line-height MUST match DETAIL_LINE_H (15) in the script. */
+.la-vg-details {
+  overflow: hidden;
+  line-height: 15px;
+}
+.la-vg-details .detail-line,
+.la-vg-details .detail-line > div {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .audiobook-title {

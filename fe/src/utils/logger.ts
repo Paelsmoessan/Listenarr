@@ -64,3 +64,59 @@ export const logger = {
     }
   },
 }
+
+/**
+ * Namespaced logger that can be toggled ON AT RUNTIME even in a production build (our deployed DEV bundle
+ * is a prod build, so `import.meta.env.DEV` is false and `logger.debug` is silent). Enable in the console:
+ *   localStorage.setItem('la-debug', '1')          // all namespaces
+ *   localStorage.setItem('la-debug', 'VG,VG/AV')   // only these namespaces
+ *   localStorage.removeItem('la-debug')            // back to dev-only default
+ * warn/error always print; debug/info honor the flag (falling back to isDev when the flag is unset).
+ */
+export class Logger {
+  constructor(
+    private readonly ns: string,
+    private readonly force?: () => boolean,
+  ) {}
+
+  private enabled(): boolean {
+    // Optional per-logger predicate wins (e.g. tie to a feature flag so no extra console command is needed).
+    try {
+      if (this.force?.()) return true
+    } catch {
+      /* predicate threw */
+    }
+    try {
+      const flag = localStorage.getItem('la-debug')
+      if (flag === '1' || flag === '*') return true
+      if (flag) return flag.split(',').some((n) => n.trim() === this.ns)
+    } catch {
+      /* localStorage may be unavailable */
+    }
+    return isDev
+  }
+
+  debug(message: string, ...args: unknown[]) {
+    if (this.enabled()) console.log(`[${this.ns}] ${message}`, ...args)
+  }
+
+  info(message: string, ...args: unknown[]) {
+    if (this.enabled()) console.info(`[${this.ns}] ${message}`, ...args)
+  }
+
+  warn(message: string, ...args: unknown[]) {
+    console.warn(`[${this.ns}] ${message}`, ...args)
+  }
+
+  error(message: string, ...args: unknown[]) {
+    console.error(`[${this.ns}] ${message}`, ...args)
+  }
+}
+
+/**
+ * Create a namespaced Logger (toggle at runtime via localStorage `la-debug`).
+ * Pass `enabled` to force it on independently of the flag (e.g. tie to a feature flag).
+ */
+export function createLogger(ns: string, opts?: { enabled?: () => boolean }): Logger {
+  return new Logger(ns, opts?.enabled)
+}
