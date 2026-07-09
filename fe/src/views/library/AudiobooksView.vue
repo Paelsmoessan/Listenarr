@@ -409,7 +409,7 @@
       :min-item-width="180"
       :aspect-ratio="1"
       :extra-height="showItemDetails ? gridExtraHeight : 0"
-      :scroll-key="`books-${groupBy}`"
+      :scroll-key="'books'"
       :class="['audiobooks-scroll-container', { 'has-selection': selectedCount > 0 }]"
     >
       <template #default="{ item: audiobook }">
@@ -952,7 +952,7 @@ import { useRootFoldersStore } from '@/stores/rootFolders'
 import { useDownloadsStore } from '@/stores/downloads'
 import { apiService } from '@/services/api'
 import { buildApiPath } from '@/services/apiBase'
-import { logger, createLogger } from '@/utils/logger'
+import { logger } from '@/utils/logger'
 import BulkEditModal from '@/components/domain/collection/BulkEditModal.vue'
 import EditAudiobookModal from '@/components/domain/audiobook/EditAudiobookModal.vue'
 import RenamePreviewModal from '@/components/domain/organize/RenamePreviewModal.vue'
@@ -1827,23 +1827,8 @@ const maxDetailLines = computed(() => {
 })
 const detailsBlockHeight = computed(() => maxDetailLines.value * DETAIL_LINE_H + DETAIL_TITLE_MB)
 const gridExtraHeight = computed(() => DETAILS_MARGIN_TOP + detailsBlockHeight.value)
-// Verbose diagnostics (Chris asked 2026-07-09): what extra-height VirtualGrid actually receives + when.
-const vgLog = createLogger('VG/AV')
-watch(
-  [showItemDetails, useVirtualGrid, maxDetailLines, detailsBlockHeight, gridExtraHeight],
-  () => {
-    if (!useVirtualGrid.value) return
-    vgLog.debug('inputs', {
-      showItemDetails: showItemDetails.value,
-      maxDetailLines: maxDetailLines.value,
-      detailsBlockHeight: detailsBlockHeight.value,
-      gridExtraHeight: gridExtraHeight.value,
-      extraHeightSentToGrid: showItemDetails.value ? gridExtraHeight.value : 0,
-      libraryCount: (libraryStore.audiobooks || []).length,
-    })
-  },
-  { immediate: true },
-)
+// NOTE: these computeds are lazy — maxDetailLines only runs when the flag-on VirtualGrid branch reads
+// gridExtraHeight (:extra-height with info on). Flag-off does no per-book library scan here.
 // -----------------------------------------------------------------------------------------------
 
 watch(showItemDetails, (v) => {
