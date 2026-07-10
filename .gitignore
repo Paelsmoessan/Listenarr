@@ -294,3 +294,6 @@ listenarr.api/config/appsettings/appsettings.json
 /docs/plans
 /docs/design
 /docs/adr
+
+# AI/session notes (private; fork is public repo)
+.claude/
