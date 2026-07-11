@@ -87,15 +87,15 @@
   touched the books path). Primary fix = the window-scroll virtualization redesign applied to ALL modes
   (books + authors + series) so the grouped views render only a screenful. Track under that redesign.
 
-## Bug: direct /config/cache/images/ file URLs bypass thumbnailing (served full-size)
-- **`?size=grid` only thumbnails via the `/api/images/{id}` endpoint; direct `/config/cache/images/temp/*.jpg`
-  URLs are static-served and ignore it** (confirmed via ai-log 2026-07-11: same cover = 27KB via /api vs
-  148-264KB via the /config/cache/temp path). Author covers (getAuthorImageUrl / ensureAuthorCover) and any
-  cover that resolves to a direct cache-file URL therefore load FULL-SIZE = the "authors slow on first load".
-  Fix options: (a) make the ImagesController thumbnail path also serve `/config/cache/images/**` requests (route
-  those through GetOrCreateThumbnailAsync), or (b) resolve author/collection covers to the `/api/images/{id}`
-  endpoint instead of raw file paths. This is the real "author cover perf" fix. Books already use the API
-  endpoint so they're fine. Backend change, separate from the grid redesign.
+## Bug: cover full-size loads
+- **FIXED 2026-07-11 (b366e89f):** direct `/config/cache/images/**` file URLs bypassed `?size=grid`
+  thumbnailing (served full-size 100-264KB). Consolidated getImageUrl's two duped library/authors rewrites
+  into one general cache-path rule that routes any cache path through `/api/images/{id}?size=grid`. Verified:
+  author covers now ~9-41KB thumbnails.
+- **Remaining minor outlier:** one cover was seen loading full-size (204KB) via `/api/images/B01CO38PWA` with
+  NO `?size=grid` param at all (different from the cache-path bug, a call site not passing the size option).
+  Low priority; find the call site that omits `{ size: 'grid' }` and pass it. (Also the pre-existing
+  oversized-thumbnail guard idea below for covers that don't compress under q80.)
 - **User-selectable overlay/caption fields, arr-style** (Chris, 2026-07-11). In Radarr/Sonarr you pick which
   metadata fields the poster shows; each selected field adds ONE uniform line to EVERY card (shown or blank).
   This is both a feature (user controls density) AND a geometry win: row height = number of selected fields =
