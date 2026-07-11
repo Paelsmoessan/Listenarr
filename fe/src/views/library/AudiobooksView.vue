@@ -209,6 +209,75 @@
       </template>
     </EmptyState>
 
+    <!-- NEW (flagged): Authors grouped mode through the unified VirtualGrid. Old grouped-view (below) is the
+         flag-off fallback (and still owns Series this step). Same VirtualGrid component as books; card markup
+         is the current author collection-card, verbatim, in the slot. -->
+    <VirtualGrid
+      v-else-if="useVirtualGrid && groupBy === 'authors'"
+      :offset-restore="true"
+      :items="groupedCollections"
+      :item-key="(c) => c.name"
+      :gap="20"
+      :min-item-width="180"
+      :overscan="2"
+      :aspect-ratio="1"
+      :extra-height="showItemDetails ? authorsExtraHeight : 0"
+      :scroll-key="'authors'"
+      :class="['audiobooks-scroll-container', { 'has-selection': selectedCount > 0 }]"
+    >
+      <template #default="{ item: collection }">
+        <div class="collection-card author-collection" @click="navigateToCollection(collection)">
+          <div class="collection-cover">
+            <div class="audiobook-poster-container author-poster" v-author-cover="collection.name">
+              <div class="series-count-badge">{{ collection.count }}</div>
+              <div
+                class="author-placeholder"
+                :class="{ loaded: authorImageLoaded[collection.name] }"
+              ></div>
+              <img
+                class="audiobook-poster author-cover"
+                :class="{ loaded: authorImageLoaded[collection.name] }"
+                :src="getProtectedImageSrc(getAuthorImageUrl(collection), getPlaceholderUrl(), { size: 'grid' })"
+                :alt="collection.name"
+                loading="lazy"
+                decoding="async"
+                @error="handleAuthorImageError(collection.name, $event)"
+                @load="onAuthorImageLoad(collection.name)"
+              />
+              <div
+                class="author-placeholder-icon"
+                :class="{ loaded: authorImageLoaded[collection.name] }"
+              >
+                <PhUser />
+              </div>
+
+              <div class="status-overlay hover-overlay">
+                <div class="audiobook-title">{{ collection.name }}</div>
+              </div>
+
+              <div class="action-buttons">
+                <button
+                  class="action-btn edit-btn-small"
+                  @click.stop="navigateToCollection(collection)"
+                  title="Open collection"
+                >
+                  <PhEye />
+                </button>
+              </div>
+            </div>
+          </div>
+          <div :class="{ 'collection-content': true }">
+            <div v-if="showItemDetails" class="grid-bottom-details">
+              <div class="detail-line title">{{ collection.name }}</div>
+              <div class="detail-line small">
+                {{ collection.count }} book{{ collection.count !== 1 ? 's' : '' }}
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+    </VirtualGrid>
+
     <!-- Grouped View -->
     <div v-else-if="groupBy !== 'books'" class="grouped-view">
       <div class="grouped-grid">
@@ -1449,6 +1518,18 @@ async function ensureAuthorCover(authorName: string) {
   }
 }
 
+// Directive replacing the author-cover IntersectionObserver for the VIRTUALIZED authors grid: VirtualGrid only
+// mounts a screenful of cards, so a card mounting == it is near-viewport. Fetch its cover on mount (same guard
+// the observer used); as cards recycle on scroll this fires per newly-mounted card = lazy, no DOM querying.
+const vAuthorCover = {
+  mounted(_el: HTMLElement, binding: { value: string }) {
+    const name = binding.value
+    if (!name) return
+    if (authorCoverOverrides[name] || authorCoverNotFound.has(name)) return
+    void ensureAuthorCover(name)
+  },
+}
+
 // Grouping mode
 const GROUP_BY_KEY = 'listenarr.groupBy'
 const GROUP_BY_MODES = ['books', 'authors', 'series'] as const
@@ -1859,6 +1940,8 @@ const maxDetailLines = computed(() => {
 })
 const detailsBlockHeight = computed(() => maxDetailLines.value * DETAIL_LINE_H + DETAIL_TITLE_MB)
 const gridExtraHeight = computed(() => DETAILS_MARGIN_TOP + detailsBlockHeight.value)
+// Authors info-on details block is a FIXED 2 lines (name + count) -> deterministic row height, no data scan.
+const authorsExtraHeight = computed(() => DETAILS_MARGIN_TOP + (2 * DETAIL_LINE_H + DETAIL_TITLE_MB))
 // Verbose diagnostics -> shared vgTrace timeline (same clock as VirtualGrid, so extra-height settle time is
 // comparable against restore time). Registered ONLY when the VirtualGrid flag is on, so flag-OFF never
 // subscribes to maxDetailLines and the whole-library scan stays dormant.
@@ -2435,6 +2518,8 @@ async function setGroupBy(mode: GroupByMode) {
 }
 
 function navigateToCollection(collection: { name: string }) {
+  // Scroll restore is handled by the authors VirtualGrid itself (offset-restore: saves scrollTop on unmount,
+  // restores it on remount), so no per-click anchor save is needed here.
   const type = groupBy.value === 'authors' ? 'author' : 'series'
   router.push(`/collection/${type}/${encodeURIComponent(collection.name)}`)
 }

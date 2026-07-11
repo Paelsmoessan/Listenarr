@@ -67,6 +67,10 @@ const props = withDefaults(
     /** if set, VirtualGrid self-manages scroll save/restore under this sessionStorage key (POC pattern):
      *  restores on mount (after width is measured) and saves on unmount. */
     scrollKey?: string
+    /** EXACT-POSITION restore (POC style): save the scroll OFFSET (px) on unmount, restore scrollToOffset on
+     *  mount. Lands exactly where you left, no re-centering. Requires deterministic geometry (uniform rows).
+     *  When false, uses the index-anchor restore (saveAnchor + scrollToIndex, centers the clicked item). */
+    offsetRestore?: boolean
   }>(),
   {
     minItemWidth: 180,
@@ -78,6 +82,7 @@ const props = withDefaults(
     extraHeight: 0,
     fixedRowHeight: 0,
     scrollKey: '',
+    offsetRestore: false,
   },
 )
 
@@ -281,6 +286,29 @@ function restoreAnchor() {
   startPostRestoreWatch()
 }
 
+// EXACT-POSITION restore (POC style): save/restore the raw scroll OFFSET keyed by scrollKey. Deterministic
+// geometry (uniform rows) makes scrollToOffset land exactly where the user left, no re-centering.
+const OFFSET_PREFIX = 'la-vg-offset.'
+function saveOffset() {
+  if (!props.scrollKey) return
+  try {
+    sessionStorage.setItem(OFFSET_PREFIX + props.scrollKey, String(parentRef.value?.scrollTop ?? 0))
+  } catch {
+    /* ignore */
+  }
+}
+function restoreOffset() {
+  if (!props.scrollKey) return
+  let saved = 0
+  try {
+    saved = Number(sessionStorage.getItem(OFFSET_PREFIX + props.scrollKey) || 0)
+  } catch {
+    /* ignore */
+  }
+  vgTrace(inst, 'restore:offset', { saved })
+  if (saved > 0) requestAnimationFrame(() => rowVirtualizer.value.scrollToOffset(saved))
+}
+
 let ro: ResizeObserver | null = null
 onMounted(async () => {
   measureContainer('mount')
@@ -298,10 +326,12 @@ onMounted(async () => {
     ro.observe(parentRef.value)
   }
   await nextTick()
-  restoreAnchor()
+  if (props.offsetRestore) restoreOffset()
+  else restoreAnchor()
 })
 onBeforeUnmount(() => {
   vgTrace(inst, 'unmount', { scrollTop: parentRef.value?.scrollTop ?? 0 })
+  if (props.offsetRestore) saveOffset()
   stopPostRestoreWatch?.()
   ro?.disconnect()
   ro = null

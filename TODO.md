@@ -87,7 +87,15 @@
   touched the books path). Primary fix = the window-scroll virtualization redesign applied to ALL modes
   (books + authors + series) so the grouped views render only a screenful. Track under that redesign.
 
-## Feature: configurable poster fields (arr-style "Poster Options")
+## Bug: direct /config/cache/images/ file URLs bypass thumbnailing (served full-size)
+- **`?size=grid` only thumbnails via the `/api/images/{id}` endpoint; direct `/config/cache/images/temp/*.jpg`
+  URLs are static-served and ignore it** (confirmed via ai-log 2026-07-11: same cover = 27KB via /api vs
+  148-264KB via the /config/cache/temp path). Author covers (getAuthorImageUrl / ensureAuthorCover) and any
+  cover that resolves to a direct cache-file URL therefore load FULL-SIZE = the "authors slow on first load".
+  Fix options: (a) make the ImagesController thumbnail path also serve `/config/cache/images/**` requests (route
+  those through GetOrCreateThumbnailAsync), or (b) resolve author/collection covers to the `/api/images/{id}`
+  endpoint instead of raw file paths. This is the real "author cover perf" fix. Books already use the API
+  endpoint so they're fine. Backend change, separate from the grid redesign.
 - **User-selectable overlay/caption fields, arr-style** (Chris, 2026-07-11). In Radarr/Sonarr you pick which
   metadata fields the poster shows; each selected field adds ONE uniform line to EVERY card (shown or blank).
   This is both a feature (user controls density) AND a geometry win: row height = number of selected fields =
