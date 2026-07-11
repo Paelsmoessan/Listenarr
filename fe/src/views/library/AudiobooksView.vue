@@ -1965,6 +1965,17 @@ const measuredRowHeight = ref<number | null>(null)
 const VIEWMODE_KEY = 'listenarr.viewMode'
 
 const viewMode = ref<'grid' | 'list'>('grid')
+// Restore the persisted view mode SYNCHRONOUSLY in setup (like groupBy), BEFORE the first render, so a back-nav
+// doesn't paint once in the default 'grid' and then flip to 'list' (the grid-flash). Previously this ran late in
+// onMounted (after the async awaits), which is what caused that flash.
+try {
+  const storedViewMode = localStorage.getItem(VIEWMODE_KEY)
+  if (storedViewMode === 'list' || storedViewMode === 'grid') {
+    viewMode.value = storedViewMode
+  }
+} catch {
+  // ignore localStorage errors (e.g., privacy mode)
+}
 
 const visibleRange = ref({ start: 0, end: DEFAULT_VISIBLE_RANGE_END })
 
@@ -2450,15 +2461,7 @@ onMounted(async () => {
     ric(() => prewarmAuthorCovers())
   }
 
-  // Load persisted view mode (if available) before layout calc
-  try {
-    const stored = localStorage.getItem(VIEWMODE_KEY)
-    if (stored === 'list' || stored === 'grid') {
-      viewMode.value = stored as 'grid' | 'list'
-    }
-  } catch {
-    // ignore localStorage errors (e.g., privacy mode)
-  }
+  // (view mode is now restored synchronously in setup, before first render, to avoid the grid->list flash)
 
   const tInit = performance.now()
   await initializeVirtualScroller()

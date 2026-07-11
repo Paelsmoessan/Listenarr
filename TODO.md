@@ -87,6 +87,13 @@
   touched the books path). Primary fix = the window-scroll virtualization redesign applied to ALL modes
   (books + authors + series) so the grouped views render only a screenful. Track under that redesign.
 
+## Feature: list view for Authors and Series
+- **Only Books have a grid/list toggle** (Chris, 2026-07-11). Authors + Series are grouped-grid only. Extend the
+  list view (the `.audiobook-list-item` row pattern + `.list-header`) to the grouped modes so authors/series can
+  also be listed, not just gridded. Would ride the same VirtualGrid list mode (fixedColumns=1 + fixedRowHeight)
+  the books list migration would use. (Books list itself: works today on the old scroller, no longer flashes
+  after the viewMode-restore-in-setup fix; migrating it to the VG is optional cleanup, not urgent.)
+
 ## Perf principle: remove anything that adds perceptible latency
 - **Guiding rule (Chris, 2026-07-11): everything that slows things down is unwanted in the long run.** This is
   a management tool - instant + reliable beats cosmetic polish. Already applied: removed the page-fade route
