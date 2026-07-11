@@ -577,7 +577,7 @@
     <!-- NEW (flagged): TanStack VirtualGrid , books GRID mode. Original scroller = fallback (below). -->
     <VirtualGrid
       v-else-if="useVirtualGrid && viewMode === 'grid'"
-      ref="virtualGridRef"
+      :offset-restore="true"
       :items="audiobooks"
       :item-key="(a) => a.id"
       :gap="20"
@@ -2009,10 +2009,6 @@ const useVirtualGrid = ref<boolean>(
     return typeof location !== 'undefined' && location.port === '4546'
   })(),
 )
-// Ref to the sideloaded VirtualGrid so navigateToDetail can record the clicked book as the restore anchor.
-const virtualGridRef = ref<{
-  saveAnchor: (key: string | number, align?: 'start' | 'center' | 'end') => void
-} | null>(null)
 
 try {
   const stored = localStorage.getItem(SHOW_ITEM_DETAILS_KEY)
@@ -2538,10 +2534,8 @@ function openStatusDetails(audiobook: Audiobook) {
 }
 
 function navigateToDetail(id: number) {
-  // VirtualGrid path: record the clicked book so we re-center it on return (index-based = geometry-safe).
-  if (useVirtualGrid.value && viewMode.value === 'grid') {
-    virtualGridRef.value?.saveAnchor(id, 'center')
-  }
+  // Scroll restore is handled by the books VirtualGrid itself (offset-restore: saves scrollTop on unmount,
+  // restores it on remount), so no per-click anchor save is needed here.
   router.push(`/audiobooks/${id}`)
 }
 
