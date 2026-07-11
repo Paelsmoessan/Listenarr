@@ -13,6 +13,9 @@
   <Folder Name="/listenarr.infrastructure/">
     <Project Path="listenarr.infrastructure/Listenarr.Infrastructure.csproj" />
   </Folder>
+  <Folder Name="/listenarr.servicehost/">
+    <Project Path="listenarr.servicehost/Listenarr.ServiceHost.csproj" />
+  </Folder>
   <Folder Name="/Solution Items/">
     <File Path="Directory.Build.props" />
     <File Path="Directory.Packages.props" />
