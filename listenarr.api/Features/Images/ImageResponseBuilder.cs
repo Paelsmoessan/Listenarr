@@ -43,7 +43,10 @@ namespace Listenarr.Api.Features.Images
             };
 
             _logger.LogInformation("Serving cached image for identifier: {Identifier}, path: {Path}", LogRedaction.SanitizeText(identifier), LogRedaction.SanitizeText(relativePath));
-            headers["Cache-Control"] = "private, max-age=3600";
+            // 30-day private cache: covers are auth-gated (never `public`) and change rarely, so let the
+            // browser reuse them across sessions instead of revalidating hourly. This is the single biggest
+            // lever for instant re-browsing (Radarr/Sonarr cache covers for a year here).
+            headers["Cache-Control"] = "private, max-age=2592000";
             return new PhysicalFileResult(fullPath, contentType)
             {
                 EnableRangeProcessing = true
