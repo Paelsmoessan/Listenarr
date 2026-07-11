@@ -22,7 +22,9 @@ param(
     [Parameter(Mandatory)][ValidateSet('Dev','Verify')][string]$Role,
     [string]$Branch,
     [switch]$BackendOnly,
-    [switch]$NoBrowser
+    [switch]$NoBrowser,
+    # Run the API as a Release build for production-representative performance testing (default Debug).
+    [switch]$Release
 )
 $ErrorActionPreference = 'Stop'
 
@@ -93,6 +95,9 @@ if (-not $BackendOnly) {
 # The whole isolation mechanism: two env vars. No code changes.
 $env:LISTENARR_CONTENT_ROOT = $data
 $env:ASPNETCORE_URLS        = "http://localhost:$port"
+# Enable the sideloaded AI debug log sink (POST /ai-log -> <data>\ai-debug-log.jsonl). Test instances only;
+# inert on LIVE. See listenarr.api/DevTools/AiDebugLogMiddleware.cs.
+$env:LISTENARR_AI_LOG       = '1'
 
 $branchNow = (git -C $tree branch --show-current 2>$null)
 Write-Host ""
@@ -109,8 +114,10 @@ Write-Host ""
 # Start the app as a child process so we can open a browser once it's listening and clean BOTH up on stop.
 # --no-launch-profile so launchSettings.json can't override our URL/env.
 Write-Host "[run-instance] starting app (first build may take a few minutes)..."
+$config = if ($Release) { 'Release' } else { 'Debug' }
+Write-Host "[run-instance] API build configuration: $config"
 $app = Start-Process dotnet -PassThru -NoNewWindow -ArgumentList @(
-    'run', '--project', $api, '-c', 'Debug', '--no-launch-profile')
+    'run', '--project', $api, '-c', $config, '--no-launch-profile')
 
 try {
     # UI runs: open the DEFAULT browser on the instance once it's listening. Close that window/tab when done

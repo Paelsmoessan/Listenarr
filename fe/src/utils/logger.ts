@@ -80,20 +80,29 @@ export class Logger {
   ) {}
 
   private enabled(): boolean {
+    let flag: string | null = null
+    try {
+      flag = localStorage.getItem('la-debug')
+    } catch {
+      /* localStorage may be unavailable */
+    }
+    // Explicit OFF wins over everything, so a tester can hard-silence during a session:
+    //   localStorage.setItem('la-debug','0')
+    if (flag === '0' || flag === 'false' || flag === 'off') return false
     // Optional per-logger predicate wins (e.g. tie to a feature flag so no extra console command is needed).
     try {
       if (this.force?.()) return true
     } catch {
       /* predicate threw */
     }
-    try {
-      const flag = localStorage.getItem('la-debug')
-      if (flag === '1' || flag === '*') return true
-      if (flag) return flag.split(',').some((n) => n.trim() === this.ns)
-    } catch {
-      /* localStorage may be unavailable */
-    }
+    if (flag === '1' || flag === '*') return true
+    if (flag) return flag.split(',').some((n) => n.trim() === this.ns)
     return isDev
+  }
+
+  /** Public view of the enable gate, so sibling diagnostics (vgTrace) honor the exact same la-debug flag. */
+  isEnabled(): boolean {
+    return this.enabled()
   }
 
   debug(message: string, ...args: unknown[]) {

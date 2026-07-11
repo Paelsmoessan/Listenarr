@@ -40,6 +40,10 @@ await app.RunListenarrStartupTasksAsync();
 
 realtimeLogSink.InitializeListenarrRealtimeLogging(app.Services);
 
+// Sideloaded dev-only AI debug log sink (inert unless LISTENARR_AI_LOG=1). Registered FIRST so it
+// short-circuits /ai-log before auth/antiforgery. Remove this line + DevTools/AiDebugLogMiddleware.cs to delete.
+app.UseMiddleware<Listenarr.Api.DevTools.AiDebugLogMiddleware>();
+
 app.UseListenarrRequestPipeline(endpoints => endpoints.MapListenarrRealtimeHubs(app.Environment));
 
 app.Run();

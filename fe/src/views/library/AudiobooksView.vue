@@ -403,6 +403,7 @@
     <!-- NEW (flagged): TanStack VirtualGrid , books GRID mode. Original scroller = fallback (below). -->
     <VirtualGrid
       v-else-if="useVirtualGrid && viewMode === 'grid'"
+      ref="virtualGridRef"
       :items="audiobooks"
       :item-key="(a) => a.id"
       :gap="20"
@@ -413,7 +414,7 @@
       :class="['audiobooks-scroll-container', { 'has-selection': selectedCount > 0 }]"
     >
       <template #default="{ item: audiobook }">
-        <div class="audiobook-wrapper">
+        <div class="audiobook-wrapper la-vg-card">
           <div
             tabindex="0"
             @keydown.enter="navigateToDetail(audiobook.id)"
@@ -952,7 +953,10 @@ import { useRootFoldersStore } from '@/stores/rootFolders'
 import { useDownloadsStore } from '@/stores/downloads'
 import { apiService } from '@/services/api'
 import { buildApiPath } from '@/services/apiBase'
-import { logger, createLogger } from '@/utils/logger'
+import { logger } from '@/utils/logger'
+import { vgTrace } from '@/utils/vgTrace'
+import { prewarmImages } from '@/utils/prewarmImages'
+import { observeImagePerf } from '@/utils/imgPerfTrace'
 import BulkEditModal from '@/components/domain/collection/BulkEditModal.vue'
 import EditAudiobookModal from '@/components/domain/audiobook/EditAudiobookModal.vue'
 import RenamePreviewModal from '@/components/domain/organize/RenamePreviewModal.vue'
@@ -1799,9 +1803,26 @@ function recalcItemsPerRow() {
 // Option: show extra details under each audiobook poster in grid view
 const SHOW_ITEM_DETAILS_KEY = 'listenarr.showItemDetails'
 const showItemDetails = ref<boolean>(false)
-// Flag: sideloaded TanStack VirtualGrid (fallback = original hand-rolled scroller). Toggle in devtools:
-// localStorage.setItem('la-virtualgrid','1'); reload. Default OFF.
-const useVirtualGrid = ref<boolean>(localStorage.getItem('la-virtualgrid') === '1')
+// Flag: sideloaded TanStack VirtualGrid (fallback = original hand-rolled scroller).
+// DEV test instance (port 4546) defaults ON so every fresh/incognito window tests the grid without a command
+// (localStorage is wiped per incognito window). Elsewhere (e.g. LIVE 4545) stays opt-in via la-virtualgrid='1'.
+// Always killable with la-virtualgrid='0'.
+const useVirtualGrid = ref<boolean>(
+  (() => {
+    try {
+      const f = localStorage.getItem('la-virtualgrid')
+      if (f === '0') return false
+      if (f === '1') return true
+    } catch {
+      /* ignore */
+    }
+    return typeof location !== 'undefined' && location.port === '4546'
+  })(),
+)
+// Ref to the sideloaded VirtualGrid so navigateToDetail can record the clicked book as the restore anchor.
+const virtualGridRef = ref<{
+  saveAnchor: (key: string | number, align?: 'start' | 'center' | 'end') => void
+} | null>(null)
 
 try {
   const stored = localStorage.getItem(SHOW_ITEM_DETAILS_KEY)
@@ -1827,23 +1848,25 @@ const maxDetailLines = computed(() => {
 })
 const detailsBlockHeight = computed(() => maxDetailLines.value * DETAIL_LINE_H + DETAIL_TITLE_MB)
 const gridExtraHeight = computed(() => DETAILS_MARGIN_TOP + detailsBlockHeight.value)
-// Verbose diagnostics (Chris asked 2026-07-09): what extra-height VirtualGrid actually receives + when.
-const vgLog = createLogger('VG/AV')
-watch(
-  [showItemDetails, useVirtualGrid, maxDetailLines, detailsBlockHeight, gridExtraHeight],
-  () => {
-    if (!useVirtualGrid.value) return
-    vgLog.debug('inputs', {
-      showItemDetails: showItemDetails.value,
-      maxDetailLines: maxDetailLines.value,
-      detailsBlockHeight: detailsBlockHeight.value,
-      gridExtraHeight: gridExtraHeight.value,
-      extraHeightSentToGrid: showItemDetails.value ? gridExtraHeight.value : 0,
-      libraryCount: (libraryStore.audiobooks || []).length,
-    })
-  },
-  { immediate: true },
-)
+// Verbose diagnostics -> shared vgTrace timeline (same clock as VirtualGrid, so extra-height settle time is
+// comparable against restore time). Registered ONLY when the VirtualGrid flag is on, so flag-OFF never
+// subscribes to maxDetailLines and the whole-library scan stays dormant.
+if (useVirtualGrid.value) {
+  watch(
+    [showItemDetails, maxDetailLines, detailsBlockHeight, gridExtraHeight],
+    () => {
+      vgTrace('AV', 'av-inputs', {
+        showItemDetails: showItemDetails.value,
+        maxDetailLines: maxDetailLines.value,
+        detailsBlockHeight: detailsBlockHeight.value,
+        gridExtraHeight: gridExtraHeight.value,
+        extraHeightSentToGrid: showItemDetails.value ? gridExtraHeight.value : 0,
+        libraryCount: (libraryStore.audiobooks || []).length,
+      })
+    },
+    { immediate: true },
+  )
+}
 // -----------------------------------------------------------------------------------------------
 
 watch(showItemDetails, (v) => {
@@ -2148,18 +2171,51 @@ async function restoreScrollPosition() {
   }
 }
 
+// Warm the BROWSER image cache with every grid thumbnail so scrolling the whole library is instant instead of
+// "load as you scroll" (server prewarm only makes the server fast; it can't fill the browser cache). Uses the
+// exact same ?size=grid URLs the grid renders, so the eventual <img> requests are cache hits. Trickled at low
+// priority + bounded concurrency; cancelled on unmount.
+let stopCoverPrewarm: (() => void) | null = null
+function prewarmGridCovers() {
+  if (viewMode.value !== 'grid') return
+  // Use the SAME sorted/filtered list the grid renders (`audiobooks`), IN ORDER, so the prewarm front runs
+  // top-to-bottom exactly the way you scroll and stays ahead of your finger. (Not libraryStore.audiobooks =
+  // raw/unsorted; that would warm out of order.)
+  const urls = audiobooks.value
+    .map((b) => getProtectedImageSrc(getBookImageUrl(b), '', { size: 'grid' }))
+    .filter((u) => !!u && u.includes('size=grid'))
+  if (!urls.length) return
+  vgTrace('AV', 'prewarm:start', { count: urls.length })
+  stopCoverPrewarm?.()
+  stopCoverPrewarm = prewarmImages(urls, { concurrency: 6 })
+}
+
 onMounted(async () => {
   document.addEventListener('click', handleClickOutside)
+  // Measure (don't theorize) whether covers load from cache vs network. Tags every /images/ load cached=t/f.
+  if (useVirtualGrid.value) observeImagePerf()
 
-  // On a return visit the Pinia store still holds the library, so render instantly from cache and
-  // refresh in the background (silent = no loading flash). Only the first load blocks on the fetch.
+  // On a return visit the Pinia store still holds the library, so DON'T refetch it. The old silent refetch
+  // re-downloaded + re-parsed all ~960 books and reassigned the array on EVERY back-out, forcing a second full
+  // grid re-render right after landing = the "slow backing out". New/edited/deleted books already refresh via
+  // their own mutation handlers (edit/delete call fetchLibrary explicitly), so cached-return is safe. Only a
+  // genuine cold load (no data yet) fetches the library.
   const hadData = libraryStore.audiobooks.length > 0
-  const libraryFetch = libraryStore.fetchLibrary({ silent: hadData })
-  await Promise.all([
+  const startupTasks: Promise<unknown>[] = [
     configStore.loadApplicationSettings(),
     loadQualityProfiles(),
-    hadData ? Promise.resolve() : libraryFetch,
-  ])
+  ]
+  if (!hadData) startupTasks.push(libraryStore.fetchLibrary())
+  await Promise.all(startupTasks)
+
+  // Browser-cache prewarm on a COLD load only (return visits are already warm this page session). Idle-scheduled
+  // so it never competes with first paint; covers trickle in and scrolling the whole grid becomes instant.
+  if (!hadData && useVirtualGrid.value) {
+    const ric =
+      (window as unknown as { requestIdleCallback?: (cb: () => void) => number }).requestIdleCallback ??
+      ((cb: () => void) => window.setTimeout(cb, 800))
+    ric(() => prewarmGridCovers())
+  }
 
   // Load persisted view mode (if available) before layout calc
   try {
@@ -2187,6 +2243,8 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   // Save before the DOM is torn down so returning to this grouping restores the position.
   saveScrollPosition()
+  // Stop any in-flight cover prewarm so it doesn't keep loading after we leave.
+  stopCoverPrewarm?.()
 })
 
 onUnmounted(() => {
@@ -2259,6 +2317,10 @@ function openStatusDetails(audiobook: Audiobook) {
 }
 
 function navigateToDetail(id: number) {
+  // VirtualGrid path: record the clicked book so we re-center it on return (index-based = geometry-safe).
+  if (useVirtualGrid.value && viewMode.value === 'grid') {
+    virtualGridRef.value?.saveAnchor(id, 'center')
+  }
   router.push(`/audiobooks/${id}`)
 }
 
@@ -3782,6 +3844,14 @@ defineExpose({
    detailsBlockHeight) with one line per row, so every info-ON card is uniform and VirtualGrid's
    deterministic row height is exact. The fallback scroller keeps the plain (variable) .grid-bottom-details.
    line-height MUST match DETAIL_LINE_H (15) in the script. */
+/* VirtualGrid perf: skip layout+paint for off-screen (overscan) cards so scrolling stays smooth. (We tried the
+   opposite, moving this off the card + big overscan to decode covers ahead, and it was much SLOWER: the extra
+   per-frame paint/decode outweighs any decode-ahead. So content-visibility stays on the whole card.) */
+.la-vg-card {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 289px;
+}
+
 .la-vg-details {
   overflow: hidden;
   line-height: 15px;

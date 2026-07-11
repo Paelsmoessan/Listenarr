@@ -36,13 +36,13 @@
 <script setup lang="ts" generic="T">
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
-import { createLogger } from '@/utils/logger'
+import { vgTrace, vgNextInst } from '@/utils/vgTrace'
 
-// Verbose diagnostics via the shared namespaced Logger. Quiet by default; enable at runtime with
-// localStorage.setItem('la-debug','1')  (or 'VG').
-const log = createLogger('VG')
-function vlog(tag: string, data?: unknown) {
-  log.debug(tag, data ?? '')
+// Verbose diagnostics -> the shared vgTrace ring buffer (timestamped + instance-correlated; dump the whole
+// timeline via window.__vgDump()). Honors the same `la-debug` gate as the console logger; quiet by default.
+const inst = vgNextInst()
+function vlog(ev: string, data?: Record<string, unknown>) {
+  vgTrace(inst, ev, data)
 }
 
 const props = withDefaults(
@@ -81,11 +81,20 @@ const props = withDefaults(
   },
 )
 
+vgTrace(inst, 'create', {
+  scrollKey: props.scrollKey,
+  items: props.items.length,
+  extraHeight: props.extraHeight,
+})
+
 const parentRef = ref<HTMLElement | null>(null)
 const containerWidth = ref(1200)
 
-function measureContainer() {
-  containerWidth.value = parentRef.value?.clientWidth ?? containerWidth.value
+function measureContainer(source: 'mount' | 'ro') {
+  const old = containerWidth.value
+  const next = parentRef.value?.clientWidth ?? old
+  containerWidth.value = next
+  vgTrace(inst, 'measure', { source, old, new: next })
 }
 
 const cols = computed(() => {
@@ -168,99 +177,130 @@ function rowCells(rowIndex: number): { item: T; index: number }[] {
   return out
 }
 
-// Self-contained scroll save/restore, when scrollKey is set. We save at exactly ONE moment: when the user
-// leaves the grid to open a detail (the parent calls saveNow() from the click handler). No per-frame
-// tracking and no unmount save — neither is needed, and they were the source of the restore fighting the
-// user and of stale/garbage saves.
-const SCROLL_PREFIX = 'la-vg-scroll.'
+// Index-based scroll restore. We do NOT save a pixel: a pixel only survives if the geometry is identical at
+// save and restore time, and the info-ON row-height settle (container-width measure + estimateSize flush)
+// breaks that, so the saved pixel lands on the wrong content = the flakiness. Instead the parent records the
+// CLICKED item's key via saveAnchor() at click time, and on remount we scrollToIndex to that item, which is
+// geometry-INDEPENDENT (the virtualizer recomputes the pixel from the current rowHeight/cols), so the
+// width / silent-refetch / cover settle can't drift it. This is TanStack used as intended.
+const ANCHOR_PREFIX = 'la-vg-anchor.'
+type Anchor = { key: string; align: 'start' | 'center' | 'end' }
 
-function saveScroll() {
+function saveAnchor(key: string | number, align: 'start' | 'center' | 'end' = 'center') {
   if (!props.scrollKey) return
   try {
-    const top = parentRef.value?.scrollTop ?? 0
-    vlog('save ' + props.scrollKey, { top, rowHeight: rowHeight.value, totalSize: totalSize.value })
-    sessionStorage.setItem(SCROLL_PREFIX + props.scrollKey, String(top))
+    const anchor: Anchor = { key: String(key), align }
+    sessionStorage.setItem(ANCHOR_PREFIX + props.scrollKey, JSON.stringify(anchor))
+    vgTrace(inst, 'anchor:save', anchor)
   } catch {
     /* ignore */
   }
 }
 
-// Any real user input aborts an in-flight restore re-assert, so it can never fight the user.
-let userInteracted = false
-function onUserIntent() {
-  userInteracted = true
+function readAnchor(): Anchor | null {
+  if (!props.scrollKey) return null
+  try {
+    const raw = sessionStorage.getItem(ANCHOR_PREFIX + props.scrollKey)
+    if (!raw) return null
+    const a = JSON.parse(raw) as Partial<Anchor>
+    if (a && typeof a.key === 'string') return { key: a.key, align: a.align ?? 'center' }
+  } catch {
+    /* ignore */
+  }
+  return null
 }
 
-function restoreScroll() {
+function clearAnchor() {
   if (!props.scrollKey) return
-  const saved = Number(sessionStorage.getItem(SCROLL_PREFIX + props.scrollKey) || 0)
-  vlog('restore:req ' + props.scrollKey, {
-    saved,
-    rowHeight: rowHeight.value,
-    totalSize: totalSize.value,
-    scrollHeight: parentRef.value?.scrollHeight,
-    clientHeight: parentRef.value?.clientHeight,
-  })
-  if (saved <= 0) return
-  // The virtualizer applies its new total height on a later async cycle, so an early scrollToOffset
-  // CLAMPS a few rows short (the flaky "2-3 rows too high"). Re-assert each frame until scrollTop reaches
-  // the saved offset, aborting the instant the user grabs the scroll so it never fights them.
-  userInteracted = false
-  let tries = 0
-  const apply = () => {
-    if (userInteracted) return
-    rowVirtualizer.value.scrollToOffset(saved)
-    tries += 1
-    const got = parentRef.value?.scrollTop ?? 0
-    if (Math.abs(got - saved) > 1 && tries < 12) {
-      requestAnimationFrame(apply)
-    } else {
-      vlog('restore:done ' + props.scrollKey, {
-        want: saved,
-        got,
-        tries,
-        totalSize: totalSize.value,
-        scrollHeight: parentRef.value?.scrollHeight,
-      })
-    }
+  try {
+    sessionStorage.removeItem(ANCHOR_PREFIX + props.scrollKey)
+  } catch {
+    /* ignore */
   }
-  requestAnimationFrame(apply)
+}
+
+// Diagnostic-only watchdog: after a restore, watch for the row height / total size STILL changing (the late
+// async settle). Fires post-restore-shift on any change; bounded to ~1200ms and cancelled on unmount. Pure
+// observation, no scroll side effects.
+let stopPostRestoreWatch: (() => void) | null = null
+function startPostRestoreWatch() {
+  stopPostRestoreWatch?.()
+  const prevRowHeight = rowHeight.value
+  const prevTotalSize = totalSize.value
+  const stop = watch([rowHeight, totalSize], ([rh, ts]) => {
+    vgTrace(inst, 'post-restore-shift', {
+      rowHeight: rh,
+      prevRowHeight,
+      totalSize: ts,
+      prevTotalSize,
+      scrollTopNow: parentRef.value?.scrollTop ?? 0,
+    })
+  })
+  stopPostRestoreWatch = () => {
+    stop()
+    stopPostRestoreWatch = null
+  }
+  window.setTimeout(() => stopPostRestoreWatch?.(), 1200)
+}
+
+function restoreAnchor() {
+  const anchor = readAnchor()
+  if (!anchor) {
+    vgTrace(inst, 'restore:skip', { reason: 'no-anchor' })
+    return
+  }
+  const idx = props.items.findIndex((it, i) => String(props.itemKey(it, i)) === anchor.key)
+  if (idx < 0) {
+    // Item is gone (re-sorted/filtered away); leave scroll at top rather than jump somewhere wrong.
+    vgTrace(inst, 'restore:index', { found: false, savedKey: anchor.key, itemsLen: props.items.length })
+    clearAnchor()
+    return
+  }
+  const row = Math.floor(idx / cols.value)
+  rowVirtualizer.value.scrollToIndex(row, { align: anchor.align })
+  vgTrace(inst, 'restore:index', {
+    found: true,
+    savedKey: anchor.key,
+    foundIndex: idx,
+    targetRow: row,
+    align: anchor.align,
+    cols: cols.value,
+    rowHeight: rowHeight.value,
+    scrollAfter: parentRef.value?.scrollTop ?? 0,
+  })
+  clearAnchor()
+  startPostRestoreWatch()
 }
 
 let ro: ResizeObserver | null = null
 onMounted(async () => {
-  measureContainer()
+  measureContainer('mount')
   vlog('mounted ' + props.scrollKey, {
     items: props.items.length,
     extraHeight: props.extraHeight,
+    containerWidth: containerWidth.value,
+    cols: cols.value,
+    tileWidth: Math.round(tileWidth.value),
     rowHeight: rowHeight.value,
+    totalSize: totalSize.value,
   })
-  ro = new ResizeObserver(() => measureContainer())
+  ro = new ResizeObserver(() => measureContainer('ro'))
   if (parentRef.value) {
     ro.observe(parentRef.value)
-    parentRef.value.addEventListener('wheel', onUserIntent, { passive: true })
-    parentRef.value.addEventListener('touchstart', onUserIntent, { passive: true })
-    parentRef.value.addEventListener('keydown', onUserIntent)
   }
   await nextTick()
-  restoreScroll()
+  restoreAnchor()
 })
 onBeforeUnmount(() => {
-  // Save on leaving the grid — covers EVERY exit (detail click, sidebar, any navigation off the page).
-  saveScroll()
-  parentRef.value?.removeEventListener('wheel', onUserIntent)
-  parentRef.value?.removeEventListener('touchstart', onUserIntent)
-  parentRef.value?.removeEventListener('keydown', onUserIntent)
+  vgTrace(inst, 'unmount', { scrollTop: parentRef.value?.scrollTop ?? 0 })
+  stopPostRestoreWatch?.()
   ro?.disconnect()
   ro = null
 })
 
-defineExpose({
-  scrollToOffset: (offset: number) => rowVirtualizer.value.scrollToOffset(offset),
-  scrollToIndex: (itemIndex: number, opts?: { align?: 'start' | 'center' | 'end' }) =>
-    rowVirtualizer.value.scrollToIndex(Math.floor(itemIndex / cols.value), opts),
-  getScrollOffset: () => parentRef.value?.scrollTop ?? 0,
-})
+// The parent calls saveAnchor(clickedItemKey) from its navigate-to-detail handler while this grid is still
+// mounted; on remount restoreAnchor() centers that item. That is the whole save/restore contract now.
+defineExpose({ saveAnchor })
 </script>
 
 <style scoped>
