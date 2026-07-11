@@ -11,6 +11,45 @@
   `'/c/sqlite/sqlite3.exe' <db> "SELECT name FROM sqlite_master WHERE name='ProcessExecutionLogs';"` (empty = drifted).
 
 ## Dev Tooling
+- **FIX deploy.ps1 health check - it throws on 4xx and cost ~3hrs on 2026-07-11 (HIGH PRIORITY).** Root cause of
+  the entire "BE won't run as a service" saga: `Start-And-Verify` does `Invoke-WebRequest $HealthUrl` where
+  `$HealthUrl` = `http://localhost:4545` (ROOT). PowerShell's `Invoke-WebRequest` THROWS on any 4xx, so when `/`
+  returned 404 (because wwwroot was missing index.html) the health check caught it and reported "not responding"
+  -> auto-rollback every time, even though the app was serving fine (401 on /api, 200 on /favicon.ico). FIX:
+  (a) catch the WebException and treat ANY HTTP status < 500 as healthy (a 404 means the server IS up), OR probe
+  a guaranteed-2xx path like `/favicon.ico` instead of `/`. (b) ALSO: a BE/Both deploy should verify wwwroot has
+  `index.html` after swapping (BE publishes with SkipFrontendBuild + BE swap preserves wwwroot via /XD, so a
+  broken wwwroot stays broken silently). Full post-mortem: reason-notes "RESOLVED" banner 2026-07-11.
+- **Native Windows Service WRAPPER - WANTED as the RESILIENCE BRIDGE (Chris, 2026-07-11 night: "it needs to be
+  the bridge that cancels out sheit like this").** Not just crash-restart - it should be the layer that makes
+  tonight's class of failure IMPOSSIBLE: (1) own a CORRECT health check (probe a real endpoint / treat 4xx as
+  "up" / confirm Kestrel is listening on 4545) so a working app is NEVER misread as dead; (2) restart the child
+  app on a genuine crash (already built - launch/monitor/backoff); (3) optionally validate a deploy is sane
+  (e.g. wwwroot has index.html, exe present) and report TRUE health to the SCM, so a bad deploy surfaces loudly
+  instead of silently rolling back a healthy app. Also sidesteps the real `WindowsServiceLifetime` #72590 bug.
+  STATUS: BUILT + proven in isolation (`listenarr.servicehost/`: Program.cs + ProcessSupervisorService.cs,
+  generic host, launch/monitor/auto-restart verified via a real separate test service). UNCOMMITTED. Remaining
+  work: (a) fix the deploy COPY so the wrapper's FULL self-contained publish output ships (not a hand-picked
+  file list - that took LIVE down once tonight), (b) add the correct health-probe logic to the supervisor,
+  (c) carefully repoint the real service at the wrapper. Do with a fresh head; Chris owns deploys.
+- **Native Windows Service WRAPPER in the fork - DECIDED 2026-07-11 (Chris, firm: "we need to build a service
+  wrapper, I am not doing this again").** Today the app registers itself with the SCM in-process via
+  `builder.Host.UseWindowsService()` (`Program.cs:31` + the `Microsoft.Extensions.Hosting.WindowsServices`
+  package, from commit `2c1e2bb5` 2026-06-18). That in-process integration is the fragile part. Build a
+  **dedicated native Windows service (a separate small process) that launches + monitors the API exe and owns
+  health/lifecycle** (start/stop/recovery), decoupled from the app itself. Fork-only. Plan:
+  `.claude/plans/windows-service-support.md`.
+  - **WHY (evidence 2026-07-11):** a fresh BE deploy would NOT stick. The new self-contained single-file exe,
+    run as the in-process Windows service, reaches SCM Running, applies EF migrations (log 19:22:44) and starts
+    its hosted services, BUT **never answers HTTP on 4545 even given 240s** (deploy.ps1 auto-rolled-back at 60s;
+    a manual swap with a 240s window ALSO failed -> restored old bin). The old July-6 build serves fine, so the
+    serve-as-service path regressed. Grid (FE) IS live; only the BE couldn't be redeployed.
+  - **Leads for the wrapper / root-cause (not chased further tonight):** (a) the 4545 URL binding is CONDITIONAL
+    in `ListenarrBuilderFactory.cs:213-219` (`builder.WebHost.UseUrls("http://*:4545")` gated by a condition) -
+    if it doesn't fire under the service context, the app binds the default port, not 4545, and the 4545 health
+    probe fails. (b) OR `app.RunListenarrStartupTasksAsync()` (awaited BEFORE `app.Run()` in Program.cs) blocks
+    the app from ever listening. A wrapper that owns health independent of the app's cold-start sidesteps both and
+    makes deploys reliable.
 - **Split the deploy script into frontend-only / backend-only / both.** `scripts/update-from-upstream.ps1`
   currently rebuilds and swaps FE+BE every time, which is slow for incremental changes. Separate targets
   (deploy FE only via `npm run build` + robocopy `fe/dist` -> `wwwroot`, no restart; deploy BE only =
@@ -27,11 +66,11 @@
   canary -> `origin/canary` (fork backup) vs keeping it local; how contrib branches push from `_Upstream` ->
   `origin` for PRs; and whether/what fork-only tooling commits (e.g. run-instance.ps1 `727620dc`) get pushed.
   Not decided yet - flagged to discuss before the next push.
-- **Update Node.js (env, 2026-07-08).** Installed Node is `v20.18.1` (single install, `C:\Program Files\nodejs`).
-  The fe toolchain wants newer: Vite 8 requires `>=20.19 / 22.12` (prints an upgrade warning on every build),
-  and `fe` engines want `^24.15.0`. The FE still builds today (warning only), but it is a latent hard-fail risk
-  as deps bump their floor. Update to Node 22 LTS (or 24). Confirmed via the run-instance.ps1 FE build
-  2026-07-08 (see reason-notes "run-instance.ps1 FE build" chapter).
+- **Update Node.js — DONE 2026-07-11.** Was `v20.18.1` (below Vite 8's `>=20.19/22.12` and `fe` engines
+  `^24.15.0`). Replaced with **nvm-windows 1.2.2** + **Node 24.18.0** (npm 11.16.0); `20.18.1` kept installed as
+  an instant rollback (`nvm use 20.18.1`). nvm symlink lives at `C:\nvm4w\nodejs` (on machine PATH). FE build
+  verified exit 0 on 24, Vite warning gone. Gotcha: a long-lived shell opened before the swap carries a stale
+  PATH (old `C:\Program Files\nodejs`, now gone) - refresh PATH or open a fresh shell so `node`/`npm` resolve.
 - **Test-instance shutdown control (2026-07-08).** While testing via the browser there's no obvious way to
   stop the running exe. Today: Ctrl+C in the launching console (run-instance.ps1's finally stops the app) or
   close that console. Wanted, two options: (a) a `stop-instance.ps1 -Role Dev|Verify` helper that kills the
