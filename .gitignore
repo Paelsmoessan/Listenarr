@@ -69,6 +69,12 @@ bld/
 *.log
 *.tlog
 *.vspscc
+
+# AI self-reading debug log (instrumentation OUTPUT: carries personal library data like ASINs / author
+# names / scroll state). The instrumentation stays; its output must never be committed. Written to the
+# content root (DEV _DevData / LIVE ProgramData, both outside the repo) - this is belt-and-suspenders in
+# case a content root is ever pointed inside the tree.
+ai-debug-log.jsonl
 *.vssscc
 .builds
 *.pidb

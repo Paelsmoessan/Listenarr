@@ -87,6 +87,16 @@
   touched the books path). Primary fix = the window-scroll virtualization redesign applied to ALL modes
   (books + authors + series) so the grouped views render only a screenful. Track under that redesign.
 
+## Perf principle: remove anything that adds perceptible latency
+- **Guiding rule (Chris, 2026-07-11): everything that slows things down is unwanted in the long run.** This is
+  a management tool - instant + reliable beats cosmetic polish. Already applied: removed the page-fade route
+  transition (big win), thumbnailed all covers, virtualized all modes.
+- **Remove the cover-image fade-in** (all modes). The `.cover-loading-image` / `.loaded` classes fade each cover
+  `opacity 0 -> 1` over ~0.2s as it loads, so covers dribble in instead of snapping. Books + series use
+  `cover-loading-image`; authors use the `audiobook-poster.author-cover` / `.loaded` fade + `author-placeholder`.
+  Kill the opacity transition (+ the `.loaded` gating / any `img.style.opacity='0'`) so covers appear
+  immediately. Shared-class CSS change across all modes. Verify no flash of broken-alt.
+
 ## Bug: author photo / name mismatch (co-authors) — CHECK BACKEND
 - **An author card shows the WRONG person's photo** (Chris, 2026-07-11, screenshot): card labelled "Jerry
   Pournelle" (1 book) displays a photo of **Larry Niven**. Name and photo are different people. Niven & Pournelle
