@@ -278,6 +278,111 @@
       </template>
     </VirtualGrid>
 
+    <VirtualGrid
+      v-else-if="useVirtualGrid && groupBy === 'series'"
+      :offset-restore="true"
+      :items="groupedCollections"
+      :item-key="(c) => c.name"
+      :gap="20"
+      :min-item-width="384"
+      :overscan="2"
+      :aspect-ratio="0.5"
+      :extra-height="showItemDetails ? seriesExtraHeight : 0"
+      :scroll-key="'series'"
+      :class="['audiobooks-scroll-container', { 'has-selection': selectedCount > 0 }]"
+    >
+      <template #default="{ item: collection }">
+        <div class="collection-card series-collection" @click="navigateToCollection(collection)">
+          <div class="collection-cover">
+            <div
+              v-if="collection.coverUrls && collection.coverUrls.length > 0"
+              class="series-covers-container"
+            >
+              <div class="series-covers">
+                <!-- Single cover: blurred background + centered cover -->
+                <template v-if="collection.coverUrls.length === 1">
+                  <img
+                    class="series-single-bg"
+                    :src="getProtectedImageSrc(collection.coverUrls[0], getPlaceholderUrl(), { size: 'grid' })"
+                    alt=""
+                    loading="lazy"
+                    decoding="async"
+                    aria-hidden="true"
+                    @error="handleImageError"
+                  />
+                  <div class="series-cover-item" :style="getCoverStyle(0, collection.coverUrls.length)">
+                    <div
+                      class="audiobook-image-placeholder"
+                      :class="{
+                        loaded: isImageLoaded(getSeriesImageKey(collection.name, 0, collection.coverUrls[0])),
+                      }"
+                    >
+                      <PhBookOpen class="audiobook-placeholder-icon" />
+                    </div>
+                    <img
+                      :src="getProtectedImageSrc(collection.coverUrls[0], getPlaceholderUrl(), { size: 'grid' })"
+                      :alt="`${collection.name} Cover`"
+                      class="series-cover-image centered cover-loading-image"
+                      :class="{
+                        loaded: isImageLoaded(getSeriesImageKey(collection.name, 0, collection.coverUrls[0])),
+                      }"
+                      loading="lazy"
+                      decoding="async"
+                      @load="markImageLoaded(getSeriesImageKey(collection.name, 0, collection.coverUrls[0]))"
+                      @error="
+                        handleLazyImageError(getSeriesImageKey(collection.name, 0, collection.coverUrls[0]), $event)
+                      "
+                    />
+                  </div>
+                </template>
+                <!-- Multiple covers: distribute across container using computed offset -->
+                <template v-else>
+                  <div
+                    v-for="(coverUrl, index) in collection.coverUrls.slice(0, 8)"
+                    :key="index"
+                    class="series-cover-item"
+                    :style="getCoverStyle(index, collection.coverUrls.length)"
+                  >
+                    <div
+                      class="audiobook-image-placeholder"
+                      :class="{ loaded: isImageLoaded(getSeriesImageKey(collection.name, index, coverUrl)) }"
+                    >
+                      <PhBookOpen class="audiobook-placeholder-icon" />
+                    </div>
+                    <img
+                      :src="getProtectedImageSrc(coverUrl, getPlaceholderUrl(), { size: 'grid' })"
+                      :alt="`${collection.name} Cover`"
+                      class="series-cover-image cover-loading-image"
+                      :class="{ loaded: isImageLoaded(getSeriesImageKey(collection.name, index, coverUrl)) }"
+                      loading="lazy"
+                      decoding="async"
+                      @load="markImageLoaded(getSeriesImageKey(collection.name, index, coverUrl))"
+                      @error="handleLazyImageError(getSeriesImageKey(collection.name, index, coverUrl), $event)"
+                    />
+                  </div>
+                </template>
+              </div>
+              <div class="series-count-badge">{{ collection.count }}</div>
+              <div class="status-overlay hover-overlay">
+                <div class="audiobook-title">{{ collection.name }}</div>
+              </div>
+            </div>
+            <div v-else class="no-cover">
+              <PhBooks />
+            </div>
+          </div>
+          <div v-if="showItemDetails" class="series-bottom-placard">
+            <div class="series-bottom-content">
+              <p class="series-bottom-title">{{ collection.name }}</p>
+              <p class="series-bottom-count">
+                {{ collection.count }} book{{ collection.count !== 1 ? 's' : '' }}
+              </p>
+            </div>
+          </div>
+        </div>
+      </template>
+    </VirtualGrid>
+
     <!-- Grouped View -->
     <div v-else-if="groupBy !== 'books'" class="grouped-view">
       <div class="grouped-grid">
@@ -1942,6 +2047,9 @@ const detailsBlockHeight = computed(() => maxDetailLines.value * DETAIL_LINE_H +
 const gridExtraHeight = computed(() => DETAILS_MARGIN_TOP + detailsBlockHeight.value)
 // Authors info-on details block is a FIXED 2 lines (name + count) -> deterministic row height, no data scan.
 const authorsExtraHeight = computed(() => DETAILS_MARGIN_TOP + (2 * DETAIL_LINE_H + DETAIL_TITLE_MB))
+// Series info-on bottom placard is also a FIXED 2 lines (name + count). Same reserve as authors; tune if the
+// placard's own margins render taller/shorter than the cards look right.
+const seriesExtraHeight = computed(() => DETAILS_MARGIN_TOP + (2 * DETAIL_LINE_H + DETAIL_TITLE_MB))
 // Verbose diagnostics -> shared vgTrace timeline (same clock as VirtualGrid, so extra-height settle time is
 // comparable against restore time). Registered ONLY when the VirtualGrid flag is on, so flag-OFF never
 // subscribes to maxDetailLines and the whole-library scan stays dormant.
@@ -2617,19 +2725,22 @@ function handleImageError(event: Event) {
   } catch {}
 }
 
-// Series cover layout constants and helper
-const SERIES_CONTAINER_WIDTH = 384
-const COVER_SIZE = 192
+// Series cover fan helper (percentage-based; see getCoverStyle)
 
 function getCoverStyle(index: number, count: number) {
-  const spacing = count <= 1 ? 0 : (SERIES_CONTAINER_WIDTH - COVER_SIZE) / Math.max(1, count - 1)
-  const left = count === 1 ? (SERIES_CONTAINER_WIDTH - COVER_SIZE) / 2 : index * spacing
+  // PERCENTAGE-based fan so it scales with the tile width (VirtualGrid tiles are fluid, not a fixed 384px).
+  // Cover is a square == half the 2:1 container width (COVER_SIZE/SERIES_CONTAINER_WIDTH = 192/384 = 50%),
+  // which is also full container height. Visually identical to the old fixed-px fan at the default width.
+  const coverWpct = 50
+  const span = 100 - coverWpct
+  const spacing = count <= 1 ? 0 : span / Math.max(1, count - 1)
+  const left = count === 1 ? span / 2 : index * spacing
   const z = count === 1 ? 1 : Math.max(1, 100 - index)
   return {
-    height: `${COVER_SIZE}px`,
-    width: `${COVER_SIZE}px`,
+    height: '100%',
+    width: `${coverWpct}%`,
     top: '0px',
-    left: `${left}px`,
+    left: `${left}%`,
     zIndex: z,
     boxShadow: 'rgba(17, 17, 17, 0.4) 4px 0px 4px',
     borderRadius: '6px',
@@ -3232,15 +3343,17 @@ defineExpose({
 }
 
 /* Special styling for series cards */
-.collection-card:has(.series-covers-container) {
+/* Grouped-view (flag-off fallback) ONLY: span two 180px columns so series cards read as wider. The VirtualGrid
+   series tile is natively wide (min-item-width), so this must NOT leak into a VG row (it would break the
+   uniform per-column layout) — hence the .grouped-grid scope. */
+.grouped-grid .collection-card:has(.series-covers-container) {
   margin-bottom: 2rem; /* Extra space for bottom placard */
-  /* Make series cards span two columns so they're visually larger than single-item collections */
   grid-column: span 2;
 }
 
 .collection-card:has(.series-covers-container) .collection-cover {
   aspect-ratio: 2/1;
-  height: 192px;
+  width: 100%; /* fill the tile; aspect-ratio drives height (was a fixed 192px) so it fits fluid VG tiles */
   background: #2a2a2a;
   border-radius: 6px;
 }
@@ -3254,9 +3367,9 @@ defineExpose({
 
 .series-covers-container {
   position: relative;
-  /* fixed width to allow stacked covers (two visible columns) */
-  width: 384px;
-  height: 192px;
+  /* fill the tile so the fanned covers scale with the (fluid) tile width */
+  width: 100%;
+  height: 100%;
   overflow: hidden;
 }
 

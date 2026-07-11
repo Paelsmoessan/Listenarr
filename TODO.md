@@ -87,6 +87,18 @@
   touched the books path). Primary fix = the window-scroll virtualization redesign applied to ALL modes
   (books + authors + series) so the grouped views render only a screenful. Track under that redesign.
 
+## Bug: author photo / name mismatch (co-authors) — CHECK BACKEND
+- **An author card shows the WRONG person's photo** (Chris, 2026-07-11, screenshot): card labelled "Jerry
+  Pournelle" (1 book) displays a photo of **Larry Niven**. Name and photo are different people. Niven & Pournelle
+  are frequent co-authors, so this is almost certainly the co-author path: the group NAME comes from
+  `book.authors?.[0]` while the author COVER is resolved from a different source (authorAsins[0] via
+  groupedCollections, and/or `ensureAuthorCover(name)` -> backend author-image lookup). If authors[] and
+  authorAsins[] are misaligned, or the backend name lookup returns the wrong co-author, name and photo diverge.
+- PRE-EXISTING (not caused by the authors-VirtualGrid change; groupedCollections + cover resolution untouched;
+  would show the same in the old view). Chris: **check the BACKEND** author-image resolution + the
+  authors/authorAsins alignment. FE entry points to trace: groupedCollections author-cover pick (~1544-1563),
+  ensureAuthorCover (1591), getAuthorImageUrl.
+
 ## Bug: cover full-size loads
 - **FIXED 2026-07-11 (b366e89f):** direct `/config/cache/images/**` file URLs bypassed `?size=grid`
   thumbnailing (served full-size 100-264KB). Consolidated getImageUrl's two duped library/authors rewrites
