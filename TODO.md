@@ -70,6 +70,11 @@
   re-encode at a lower quality (or smaller max edge) so no "thumbnail" is near original size. 0.2% of
   the library, purely cosmetic. Verified 2026-07-05 that the grid otherwise serves thumbs correctly
   (e.g. 1570KB original to 65KB via ?size=grid).
+- **Clamp the center row across the info-details toggle** (Chris, 2026-07-11). Toggling info on/off changes
+  row height, so the grid jumps away from where you were browsing. Anchor the center-visible row across the
+  toggle: capture that row's item key just before the height change, then `scrollToIndex(thatRow, align:'center')`
+  after. Reuses the VirtualGrid index-restore mechanism (same as back-nav restore), applied to the toggle so
+  you land in the ballpark of your current position instead of jumping.
 
 ## Design (larger, separate from PR #733)
 - **Canonical cover identity** (follow-up from PR #733 review, 2026-07-05). The image cache today
