@@ -2382,6 +2382,36 @@ function prewarmGridCovers() {
   stopCoverPrewarm = prewarmImages(urls, { concurrency: 6 })
 }
 
+// Author-cover pre-warm (frontend sideload): unlike book/series covers (static files, pre-warmed server-side),
+// author photos resolve on-demand via ensureAuthorCover -> a provider lookup, so the FIRST Authors view lags.
+// On a cold load, trickle the distinct authors through the EXISTING ensureAuthorCover (which resolves + caches
+// each photo, and self-guards against re-fetch) at bounded concurrency + low priority, so Authors is warm before
+// you open it. Bounded so we don't hammer the Audible/Audnexus providers. Cancelled on unmount. No backend touch.
+let stopAuthorPrewarm = false
+async function prewarmAuthorCovers() {
+  const names = [
+    ...new Set(
+      (libraryStore.audiobooks || []).map((b) => b.authors?.[0]).filter(Boolean) as string[],
+    ),
+  ].filter((n) => !authorCoverOverrides[n] && !authorCoverNotFound.has(n))
+  if (!names.length) return
+  vgTrace('AV', 'author-prewarm:start', { count: names.length })
+  stopAuthorPrewarm = false
+  const CONCURRENCY = 4
+  let i = 0
+  const worker = async () => {
+    while (!stopAuthorPrewarm && i < names.length) {
+      const name = names[i++]
+      try {
+        await ensureAuthorCover(name) // self-guarded; resolves + caches the author photo
+      } catch {
+        /* ensureAuthorCover handles its own errors */
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, names.length) }, () => worker()))
+}
+
 onMounted(async () => {
   const tOnMounted = performance.now()
   vgTrace('AV', 'onmounted:start', {})
@@ -2416,6 +2446,8 @@ onMounted(async () => {
       (window as unknown as { requestIdleCallback?: (cb: () => void) => number }).requestIdleCallback ??
       ((cb: () => void) => window.setTimeout(cb, 800))
     ric(() => prewarmGridCovers())
+    // Warm author photos too (resolved on-demand, unlike static book covers) so Authors is instant when opened.
+    ric(() => prewarmAuthorCovers())
   }
 
   // Load persisted view mode (if available) before layout calc
@@ -2456,6 +2488,7 @@ onBeforeUnmount(() => {
   saveScrollPosition()
   // Stop any in-flight cover prewarm so it doesn't keep loading after we leave.
   stopCoverPrewarm?.()
+  stopAuthorPrewarm = true
 })
 
 onUnmounted(() => {
