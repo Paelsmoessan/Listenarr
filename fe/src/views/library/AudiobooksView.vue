@@ -408,6 +408,7 @@
       :item-key="(a) => a.id"
       :gap="20"
       :min-item-width="180"
+      :overscan="2"
       :aspect-ratio="1"
       :extra-height="showItemDetails ? gridExtraHeight : 0"
       :scroll-key="`books-${groupBy}`"
@@ -1841,12 +1842,19 @@ const DETAIL_LINE_H = 15 // px per detail line; MUST match --? line-height in .l
 const DETAIL_TITLE_MB = 4 // .detail-line.title margin-bottom (kept from existing CSS)
 const DETAILS_MARGIN_TOP = 8 // .grid-bottom-details margin-top (gap between poster and details)
 const maxDetailLines = computed(() => {
+  const t0 = performance.now()
   let max = 4 // title + author + publisher/year + status are always present
   for (const a of libraryStore.audiobooks || []) {
     const lines =
       4 + ((a.narrators?.length ?? 0) > 0 ? 1 : 0) + (formatSeriesMemberships(a) ? 1 : 0)
     if (lines > max) max = lines
   }
+  // DIAGNOSTIC: how costly is this whole-library scan and how often does it recompute on remount?
+  vgTrace('AV', 'maxDetailLines:compute', {
+    ms: Math.round((performance.now() - t0) * 100) / 100,
+    count: (libraryStore.audiobooks || []).length,
+    max,
+  })
   return max // 4..6
 })
 const detailsBlockHeight = computed(() => maxDetailLines.value * DETAIL_LINE_H + DETAIL_TITLE_MB)
@@ -2194,6 +2202,8 @@ function prewarmGridCovers() {
 }
 
 onMounted(async () => {
+  const tOnMounted = performance.now()
+  vgTrace('AV', 'onmounted:start', {})
   document.addEventListener('click', handleClickOutside)
   // Measure (don't theorize) whether covers load from cache vs network. Tags every /images/ load cached=t/f.
   if (useVirtualGrid.value) observeImagePerf()
@@ -2204,12 +2214,19 @@ onMounted(async () => {
   // their own mutation handlers (edit/delete call fetchLibrary explicitly), so cached-return is safe. Only a
   // genuine cold load (no data yet) fetches the library.
   const hadData = libraryStore.audiobooks.length > 0
-  const startupTasks: Promise<unknown>[] = [
-    configStore.loadApplicationSettings(),
-    loadQualityProfiles(),
-  ]
+  // Return visits already hold config + profiles in memory. Re-fetching them re-hit the API on EVERY back-nav
+  // (4-5s under load) for no benefit. Only fetch what's actually missing (mirrors the hadData library guard).
+  // Safe: the grid spinner is `libraryStore.loading`, so these calls don't gate render either way.
+  const settingsCached = !!configStore.applicationSettings
+  const profilesCached = qualityProfiles.value.length > 0
+  const startupTasks: Promise<unknown>[] = []
+  if (!settingsCached) startupTasks.push(configStore.loadApplicationSettings())
+  if (!profilesCached) startupTasks.push(loadQualityProfiles())
   if (!hadData) startupTasks.push(libraryStore.fetchLibrary())
+  const tAwaits = performance.now()
+  vgTrace('AV', 'awaits:start', { hadData, settingsCached, profilesCached, tasks: startupTasks.length })
   await Promise.all(startupTasks)
+  vgTrace('AV', 'awaits:end', { ms: Math.round(performance.now() - tAwaits) })
 
   // Browser-cache prewarm on a COLD load only (return visits are already warm this page session). Idle-scheduled
   // so it never competes with first paint; covers trickle in and scrolling the whole grid becomes instant.
@@ -2230,7 +2247,9 @@ onMounted(async () => {
     // ignore localStorage errors (e.g., privacy mode)
   }
 
+  const tInit = performance.now()
   await initializeVirtualScroller()
+  vgTrace('AV', 'initscroller:end', { ms: Math.round(performance.now() - tInit) })
 
   // Restore the books inner-container scroll saved when we last left this grouping (no-op otherwise).
   await restoreScrollPosition()
@@ -2241,6 +2260,14 @@ onMounted(async () => {
       observeAuthorCards()
     } catch {}
   }
+  vgTrace('AV', 'onmounted:end', { ms: Math.round(performance.now() - tOnMounted) })
+  // Double-rAF fires only once the main thread is free again; a big gap vs onmounted:end reveals a long
+  // synchronous render/task still blocking after onMounted returns.
+  requestAnimationFrame(() =>
+    requestAnimationFrame(() =>
+      vgTrace('AV', 'thread-free', { sinceOnMountedMs: Math.round(performance.now() - tOnMounted) }),
+    ),
+  )
 })
 
 onBeforeUnmount(() => {

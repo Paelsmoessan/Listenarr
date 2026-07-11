@@ -257,7 +257,16 @@ function restoreAnchor() {
     return
   }
   const row = Math.floor(idx / cols.value)
+  const tScroll = performance.now()
   rowVirtualizer.value.scrollToIndex(row, { align: anchor.align })
+  // DIAGNOSTIC: the scroll jump re-renders the target screenful of cards. Measure how long the main thread
+  // stays blocked afterwards (double-rAF fires only once it's free) — prime suspect for the ~1.6s stall
+  // before covers load.
+  requestAnimationFrame(() =>
+    requestAnimationFrame(() =>
+      vgTrace(inst, 'restore:thread-free', { ms: Math.round(performance.now() - tScroll) }),
+    ),
+  )
   vgTrace(inst, 'restore:index', {
     found: true,
     savedKey: anchor.key,

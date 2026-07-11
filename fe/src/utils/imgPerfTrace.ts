@@ -28,6 +28,29 @@ import { vgTrace } from './vgTrace'
 
 let observing = false
 
+// Settle detector: cover loads on a back-nav arrive in a burst then stop. We fire `grid:settled` once no new
+// /images/ load has been seen for SETTLE_MS, and report how many loaded in the burst + when it started. Pairing
+// grid:settled.t with the preceding restore:index.t gives the real "time to fully render" (the ~2s), which the
+// first-paint probes undercount.
+const SETTLE_MS = 500
+let settleTimer: ReturnType<typeof setTimeout> | null = null
+let burstCount = 0
+let burstStart = 0
+
+function noteImageForSettle(): void {
+  if (burstCount === 0) burstStart = performance.now()
+  burstCount++
+  if (settleTimer) clearTimeout(settleTimer)
+  settleTimer = setTimeout(() => {
+    vgTrace('IMG', 'grid:settled', {
+      covers: burstCount,
+      burstMs: Math.round(performance.now() - burstStart - SETTLE_MS),
+    })
+    settleTimer = null
+    burstCount = 0
+  }, SETTLE_MS)
+}
+
 export function observeImagePerf(): void {
   if (observing || typeof PerformanceObserver === 'undefined') return
   observing = true
@@ -46,6 +69,7 @@ export function observeImagePerf(): void {
           durationMs: Math.round(r.duration),
           initiator: r.initiatorType,
         })
+        noteImageForSettle()
       }
     })
     // buffered:true also replays entries that landed just before we started observing.
