@@ -75,6 +75,14 @@
   toggle: capture that row's item key just before the height change, then `scrollToIndex(thatRow, align:'center')`
   after. Reuses the VirtualGrid index-restore mechanism (same as back-nav restore), applied to the toggle so
   you land in the ballpark of your current position instead of jumping.
+- **Authors/Series grouped view: slow cover loading + not virtualized** (Chris, 2026-07-11). The grouped
+  authors/series view (`groupBy !== 'books'`) is NOT wrapped in VirtualGrid, it renders ALL collections at
+  once, so every cover loads/decodes up front = slow on large libraries (Chris: covers load slow on Series).
+  Two threads: (1) extend the VirtualGrid slot pattern to the grouped authors + series grids (was in the
+  original TanStack migration scope, never done) so only a screenful renders; (2) investigate **author cover
+  photo** perf/resolution specifically (author covers resolve via ASIN/name `ensureAuthorCover`, may be a
+  separate slow path from book covers). Books grid already gets the cache/overscan/lazy wins; grouped views do
+  not yet.
 
 ## Design (larger, separate from PR #733)
 - **Canonical cover identity** (follow-up from PR #733 review, 2026-07-05). The image cache today
