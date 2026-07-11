@@ -27,11 +27,20 @@
   app on a genuine crash (already built - launch/monitor/backoff); (3) optionally validate a deploy is sane
   (e.g. wwwroot has index.html, exe present) and report TRUE health to the SCM, so a bad deploy surfaces loudly
   instead of silently rolling back a healthy app. Also sidesteps the real `WindowsServiceLifetime` #72590 bug.
+  (4) **VERBOSE LOGGING = TOP PRIORITY (Chris, 2026-07-11 night).** The wrapper must log LOUDLY and in detail:
+  child process launch (PID, exe path, args), each health-probe attempt + its result (which endpoint, status
+  code, latency - so "401 = up" is obvious), every restart with the reason, exit codes, and how long the child
+  took to become healthy. This is the OBSERVABILITY LAYER that would have turned tonight's silent 3-hour ghost
+  hunt into a 2-minute log read. **Rationale (Chris):** it's the early-warning system for **incorporating
+  upstream fixes** - when we adopt/"cherry-pick" landed upstream changes into the fork, a verbose wrapper catches
+  a silent regression (like tonight's) immediately at deploy time instead of costing hours. Prioritize this over
+  the fancy resilience features.
   STATUS: BUILT + proven in isolation (`listenarr.servicehost/`: Program.cs + ProcessSupervisorService.cs,
-  generic host, launch/monitor/auto-restart verified via a real separate test service). UNCOMMITTED. Remaining
-  work: (a) fix the deploy COPY so the wrapper's FULL self-contained publish output ships (not a hand-picked
-  file list - that took LIVE down once tonight), (b) add the correct health-probe logic to the supervisor,
-  (c) carefully repoint the real service at the wrapper. Do with a fresh head; Chris owns deploys.
+  generic host, launch/monitor/auto-restart verified via a real separate test service). Committed `3f63f152`.
+  Remaining work: (a) add VERBOSE health/lifecycle LOGGING (priority, see #4), (b) add the correct health-probe
+  logic (probe a real endpoint / treat 4xx as up - NOT `/`), (c) fix the deploy COPY so the wrapper's FULL
+  self-contained publish output ships (not a hand-picked file list - that took LIVE down once tonight),
+  (d) carefully repoint the real service at the wrapper. Do with a fresh head; Chris owns deploys.
 - **Native Windows Service WRAPPER in the fork - DECIDED 2026-07-11 (Chris, firm: "we need to build a service
   wrapper, I am not doing this again").** Today the app registers itself with the SCM in-process via
   `builder.Host.UseWindowsService()` (`Program.cs:31` + the `Microsoft.Extensions.Hosting.WindowsServices`
