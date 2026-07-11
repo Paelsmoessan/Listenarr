@@ -106,6 +106,11 @@
   persist the selection (localStorage or ApplicationSettings). Build the grid-redesign details block field-list-
   driven now (default = today's fields) so adding the UI later is small. See
   .claude/plans/grid-redesign-unified-virtualizer.md.
+- **Review the AUTHORS info-on details block** (Chris, 2026-07-11). After virtualizing authors, the info-on
+  details are currently just name + count (fixed 2-line reserve, authorsExtraHeight=42px). Needs a proper look:
+  what fields authors should show, layout/spacing vs the book cards, and fold it into the field-list-driven /
+  configurable-fields model above rather than the ad-hoc 2-line block. Same review likely applies to series
+  details when that mode is virtualized (step 2).
 
 ## Design (larger, separate from PR #733)
 - **Canonical cover identity** (follow-up from PR #733 review, 2026-07-05). The image cache today
