@@ -87,6 +87,18 @@
   touched the books path). Primary fix = the window-scroll virtualization redesign applied to ALL modes
   (books + authors + series) so the grouped views render only a screenful. Track under that redesign.
 
+## Feature: configurable poster fields (arr-style "Poster Options")
+- **User-selectable overlay/caption fields, arr-style** (Chris, 2026-07-11). In Radarr/Sonarr you pick which
+  metadata fields the poster shows; each selected field adds ONE uniform line to EVERY card (shown or blank).
+  This is both a feature (user controls density) AND a geometry win: row height = number of selected fields =
+  deterministic by construction, NO whole-library maxDetailLines scan, NO conditional per-card lines. Replaces
+  today's "narrator/series line only if present" (which varies per card and needs the scan). Staying true to the
+  *arr design (Chris's constraint) = adopt this model. Pieces: (1) render the details block from a FIELD LIST
+  (not hardcoded conditionals) so N fields = N lines; (2) a small Poster-Options UI to toggle fields; (3)
+  persist the selection (localStorage or ApplicationSettings). Build the grid-redesign details block field-list-
+  driven now (default = today's fields) so adding the UI later is small. See
+  .claude/plans/grid-redesign-unified-virtualizer.md.
+
 ## Design (larger, separate from PR #733)
 - **Canonical cover identity** (follow-up from PR #733 review, 2026-07-05). The image cache today
   names files by a *sanitized identifier* (`ImageCachePathResolver.SanitizeFileName`), and the
