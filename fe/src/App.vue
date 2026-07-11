@@ -495,9 +495,9 @@
           <RouterView />
         </div>
         <RouterView v-else v-slot="{ Component }">
-          <Transition name="page-fade">
-            <component :is="Component" :key="route.name as string" />
-          </Transition>
+          <!-- No route transition: this is a management tool, instant + reliable beats a cosmetic fade. The
+               page-fade transition also caused an opacity-0 stuck-view bug when combined with KeepAlive. -->
+          <component :is="Component" :key="route.name as string" />
         </RouterView>
       </main>
     </div>
@@ -1879,17 +1879,6 @@ these are not present, the Google Fonts import in `fe/index.html` will be used a
 }
 
 /* Page transition: new view fades in; old view leaves instantly to avoid blank flash */
-.page-fade-enter-active {
-  transition: opacity 150ms ease;
-}
-.page-fade-enter-from {
-  opacity: 0;
-}
-.page-fade-leave-active {
-  position: absolute;
-  transition: none;
-  opacity: 0;
-}
 
 /* Main Content */
 .main-content {
