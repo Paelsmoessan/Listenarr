@@ -64,13 +64,10 @@ const props = withDefaults(
     extraHeight?: number
     /** if > 0, use this fixed row height directly instead of computing from tile width (list mode). */
     fixedRowHeight?: number
-    /** if set, VirtualGrid self-manages scroll save/restore under this sessionStorage key (POC pattern):
-     *  restores on mount (after width is measured) and saves on unmount. */
+    /** if set, VirtualGrid self-manages EXACT-POSITION scroll save/restore under this sessionStorage key:
+     *  saves the scroll offset on unmount, restores scrollToOffset on mount (after width is measured), so you
+     *  land exactly where you left. Requires deterministic geometry (uniform rows), which this grid has. */
     scrollKey?: string
-    /** EXACT-POSITION restore (POC style): save the scroll OFFSET (px) on unmount, restore scrollToOffset on
-     *  mount. Lands exactly where you left, no re-centering. Requires deterministic geometry (uniform rows).
-     *  When false, uses the index-anchor restore (saveAnchor + scrollToIndex, centers the clicked item). */
-    offsetRestore?: boolean
   }>(),
   {
     minItemWidth: 180,
@@ -82,7 +79,6 @@ const props = withDefaults(
     extraHeight: 0,
     fixedRowHeight: 0,
     scrollKey: '',
-    offsetRestore: false,
   },
 )
 
@@ -182,110 +178,6 @@ function rowCells(rowIndex: number): { item: T; index: number }[] {
   return out
 }
 
-// Index-based scroll restore. We do NOT save a pixel: a pixel only survives if the geometry is identical at
-// save and restore time, and the info-ON row-height settle (container-width measure + estimateSize flush)
-// breaks that, so the saved pixel lands on the wrong content = the flakiness. Instead the parent records the
-// CLICKED item's key via saveAnchor() at click time, and on remount we scrollToIndex to that item, which is
-// geometry-INDEPENDENT (the virtualizer recomputes the pixel from the current rowHeight/cols), so the
-// width / silent-refetch / cover settle can't drift it. This is TanStack used as intended.
-const ANCHOR_PREFIX = 'la-vg-anchor.'
-type Anchor = { key: string; align: 'start' | 'center' | 'end' }
-
-function saveAnchor(key: string | number, align: 'start' | 'center' | 'end' = 'center') {
-  if (!props.scrollKey) return
-  try {
-    const anchor: Anchor = { key: String(key), align }
-    sessionStorage.setItem(ANCHOR_PREFIX + props.scrollKey, JSON.stringify(anchor))
-    vgTrace(inst, 'anchor:save', anchor)
-  } catch {
-    /* ignore */
-  }
-}
-
-function readAnchor(): Anchor | null {
-  if (!props.scrollKey) return null
-  try {
-    const raw = sessionStorage.getItem(ANCHOR_PREFIX + props.scrollKey)
-    if (!raw) return null
-    const a = JSON.parse(raw) as Partial<Anchor>
-    if (a && typeof a.key === 'string') return { key: a.key, align: a.align ?? 'center' }
-  } catch {
-    /* ignore */
-  }
-  return null
-}
-
-function clearAnchor() {
-  if (!props.scrollKey) return
-  try {
-    sessionStorage.removeItem(ANCHOR_PREFIX + props.scrollKey)
-  } catch {
-    /* ignore */
-  }
-}
-
-// Diagnostic-only watchdog: after a restore, watch for the row height / total size STILL changing (the late
-// async settle). Fires post-restore-shift on any change; bounded to ~1200ms and cancelled on unmount. Pure
-// observation, no scroll side effects.
-let stopPostRestoreWatch: (() => void) | null = null
-function startPostRestoreWatch() {
-  stopPostRestoreWatch?.()
-  const prevRowHeight = rowHeight.value
-  const prevTotalSize = totalSize.value
-  const stop = watch([rowHeight, totalSize], ([rh, ts]) => {
-    vgTrace(inst, 'post-restore-shift', {
-      rowHeight: rh,
-      prevRowHeight,
-      totalSize: ts,
-      prevTotalSize,
-      scrollTopNow: parentRef.value?.scrollTop ?? 0,
-    })
-  })
-  stopPostRestoreWatch = () => {
-    stop()
-    stopPostRestoreWatch = null
-  }
-  window.setTimeout(() => stopPostRestoreWatch?.(), 1200)
-}
-
-function restoreAnchor() {
-  const anchor = readAnchor()
-  if (!anchor) {
-    vgTrace(inst, 'restore:skip', { reason: 'no-anchor' })
-    return
-  }
-  const idx = props.items.findIndex((it, i) => String(props.itemKey(it, i)) === anchor.key)
-  if (idx < 0) {
-    // Item is gone (re-sorted/filtered away); leave scroll at top rather than jump somewhere wrong.
-    vgTrace(inst, 'restore:index', { found: false, savedKey: anchor.key, itemsLen: props.items.length })
-    clearAnchor()
-    return
-  }
-  const row = Math.floor(idx / cols.value)
-  const tScroll = performance.now()
-  rowVirtualizer.value.scrollToIndex(row, { align: anchor.align })
-  // DIAGNOSTIC: the scroll jump re-renders the target screenful of cards. Measure how long the main thread
-  // stays blocked afterwards (double-rAF fires only once it's free) — prime suspect for the ~1.6s stall
-  // before covers load.
-  requestAnimationFrame(() =>
-    requestAnimationFrame(() =>
-      vgTrace(inst, 'restore:thread-free', { ms: Math.round(performance.now() - tScroll) }),
-    ),
-  )
-  vgTrace(inst, 'restore:index', {
-    found: true,
-    savedKey: anchor.key,
-    foundIndex: idx,
-    targetRow: row,
-    align: anchor.align,
-    cols: cols.value,
-    rowHeight: rowHeight.value,
-    scrollAfter: parentRef.value?.scrollTop ?? 0,
-  })
-  clearAnchor()
-  startPostRestoreWatch()
-}
-
 // EXACT-POSITION restore (POC style): save/restore the raw scroll OFFSET keyed by scrollKey. Deterministic
 // geometry (uniform rows) makes scrollToOffset land exactly where the user left, no re-centering.
 const OFFSET_PREFIX = 'la-vg-offset.'
@@ -326,20 +218,14 @@ onMounted(async () => {
     ro.observe(parentRef.value)
   }
   await nextTick()
-  if (props.offsetRestore) restoreOffset()
-  else restoreAnchor()
+  restoreOffset()
 })
 onBeforeUnmount(() => {
   vgTrace(inst, 'unmount', { scrollTop: parentRef.value?.scrollTop ?? 0 })
-  if (props.offsetRestore) saveOffset()
-  stopPostRestoreWatch?.()
+  saveOffset()
   ro?.disconnect()
   ro = null
 })
-
-// The parent calls saveAnchor(clickedItemKey) from its navigate-to-detail handler while this grid is still
-// mounted; on remount restoreAnchor() centers that item. That is the whole save/restore contract now.
-defineExpose({ saveAnchor })
 </script>
 
 <style scoped>

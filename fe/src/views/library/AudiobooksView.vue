@@ -213,9 +213,7 @@
          flag-off fallback (and still owns Series this step). Same VirtualGrid component as books; card markup
          is the current author collection-card, verbatim, in the slot. -->
     <VirtualGrid
-      v-else-if="useVirtualGrid && groupBy === 'authors'"
-      :offset-restore="true"
-      :items="groupedCollections"
+      v-else-if="useVirtualGrid && groupBy === 'authors'"      :items="groupedCollections"
       :item-key="(c) => c.name"
       :gap="20"
       :min-item-width="180"
@@ -279,9 +277,7 @@
     </VirtualGrid>
 
     <VirtualGrid
-      v-else-if="useVirtualGrid && groupBy === 'series'"
-      :offset-restore="true"
-      :items="groupedCollections"
+      v-else-if="useVirtualGrid && groupBy === 'series'"      :items="groupedCollections"
       :item-key="(c) => c.name"
       :gap="20"
       :min-item-width="384"
@@ -576,9 +572,7 @@
 
     <!-- NEW (flagged): TanStack VirtualGrid , books GRID mode. Original scroller = fallback (below). -->
     <VirtualGrid
-      v-else-if="useVirtualGrid && viewMode === 'grid'"
-      :offset-restore="true"
-      :items="audiobooks"
+      v-else-if="useVirtualGrid && viewMode === 'grid'"      :items="audiobooks"
       :item-key="(a) => a.id"
       :gap="20"
       :min-item-width="180"
