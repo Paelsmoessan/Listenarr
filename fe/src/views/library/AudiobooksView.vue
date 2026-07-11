@@ -1999,9 +1999,8 @@ function recalcItemsPerRow() {
 const SHOW_ITEM_DETAILS_KEY = 'listenarr.showItemDetails'
 const showItemDetails = ref<boolean>(false)
 // Flag: sideloaded TanStack VirtualGrid (fallback = original hand-rolled scroller).
-// DEV test instance (port 4546) defaults ON so every fresh/incognito window tests the grid without a command
-// (localStorage is wiped per incognito window). Elsewhere (e.g. LIVE 4545) stays opt-in via la-virtualgrid='1'.
-// Always killable with la-virtualgrid='0'.
+// Our fork ships the grid ON by default in every deployment (DEV 4546 + LIVE 4545): it's the version we run.
+// Killable per-browser with la-virtualgrid='0' (instant revert to the old scroller); '1' forces it on.
 const useVirtualGrid = ref<boolean>(
   (() => {
     try {
@@ -2011,7 +2010,7 @@ const useVirtualGrid = ref<boolean>(
     } catch {
       /* ignore */
     }
-    return typeof location !== 'undefined' && location.port === '4546'
+    return true
   })(),
 )
 
