@@ -83,6 +83,9 @@
   photo** perf/resolution specifically (author covers resolve via ASIN/name `ensureAuthorCover`, may be a
   separate slow path from book covers). Books grid already gets the cache/overscan/lazy wins; grouped views do
   not yet.
+  **Confirmed still too slow on Series 2026-07-11** (after the cache/lazy/overscan/page-fade pass, which only
+  touched the books path). Primary fix = the window-scroll virtualization redesign applied to ALL modes
+  (books + authors + series) so the grouped views render only a screenful. Track under that redesign.
 
 ## Design (larger, separate from PR #733)
 - **Canonical cover identity** (follow-up from PR #733 review, 2026-07-05). The image cache today
