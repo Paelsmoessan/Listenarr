@@ -1429,32 +1429,19 @@ class ApiService {
 
       return imageUrl
     }
-    // If the stored path is the library cache path, convert to our images API endpoint
-    // Example stored path: /config/cache/images/library/B0DD5FX7QG.jpg
+    // Any cached-image path (library/, authors/, temp/, ...) -> route through the images API endpoint so it
+    // gets thumbnailed. Served-as-static file paths ignore ?size=grid, so without this they load full-size.
+    // The basename (minus extension) is the identifier; buildApiImageUrl appends the ?size thumbnail param.
+    // Example stored paths: /config/cache/images/library/B0DD5FX7QG.jpg, /config/cache/images/temp/B00X.jpg
     try {
-      const libMatch = imageUrl.match(/\/config\/cache\/images\/library\/(.+)$/)
-      if (libMatch && libMatch[1]) {
-        // Extract filename (with extension) and strip extension to use as identifier
-        const filename = libMatch[1]
-        const identifier = filename.replace(/\.[^.]+$/, '')
+      const cacheMatch = imageUrl.match(/\/config\/cache\/images\/(?:.*\/)?([^/]+)$/)
+      if (cacheMatch && cacheMatch[1]) {
+        const identifier = cacheMatch[1].replace(/\.[^.]+$/, '')
         return buildApiImageUrl(identifier, undefined, opts?.size)
       }
     } catch (e) {
       // fall back to default behavior below on any error
-      logger.debug('[ApiService] getImageUrl library-detect error', e)
-    }
-
-    // If the stored path is the authors cache path, convert to our images API endpoint
-    // Example stored path: /config/cache/images/authors/AUTHORASIN.jpg
-    try {
-      const authorMatch = imageUrl.match(/\/config\/cache\/images\/authors\/(.+)$/)
-      if (authorMatch && authorMatch[1]) {
-        const filename = authorMatch[1]
-        const identifier = filename.replace(/\.[^.]+$/, '')
-        return buildApiImageUrl(identifier, undefined, opts?.size)
-      }
-    } catch (e) {
-      logger.debug('[ApiService] getImageUrl authors-detect error', e)
+      logger.debug('[ApiService] getImageUrl cache-path-detect error', e)
     }
 
     // Convert other relative URLs to absolute (no query-string auth tokens). Library book covers
