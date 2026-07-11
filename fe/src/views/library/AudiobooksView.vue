@@ -448,12 +448,15 @@
               >
                 <PhBookOpen class="audiobook-placeholder-icon" />
               </div>
+              <!-- No loading="lazy" here: the grid is virtualized, so only near-viewport rows ever mount.
+                   Native lazy adds a per-image viewport check that delays each cover's fetch/decode, which is
+                   what makes covers trickle in one-by-one when the view remounts (e.g. backing out of a book).
+                   Letting the mounted (visible) covers load immediately paints them together instead. -->
               <img
                 :src="getProtectedImageSrc(getBookImageUrl(audiobook), getPlaceholderUrl(), { size: 'grid' })"
                 :alt="audiobook.title"
                 class="audiobook-poster cover-loading-image"
                 :class="{ loaded: isImageLoaded(getBookImageKey(audiobook)) }"
-                loading="lazy"
                 decoding="async"
                 @load="markImageLoaded(getBookImageKey(audiobook))"
                 @error="handleLazyImageError(getBookImageKey(audiobook), $event)"
