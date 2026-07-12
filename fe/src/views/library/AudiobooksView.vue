@@ -1977,6 +1977,18 @@ try {
   // ignore localStorage errors (e.g., privacy mode)
 }
 
+// Persist view mode on every change, registered at setup level (like groupBy/searchQuery) so it does NOT depend
+// on initializeVirtualScroller running. That function early-returns when scrollContainer is null, which is the
+// case whenever the VirtualGrid is the active books component (grid mode + useVirtualGrid on, the default). If
+// this watch lived inside it, toggling to list would never write localStorage and every nav would restore grid.
+watch(viewMode, (v) => {
+  try {
+    localStorage.setItem(VIEWMODE_KEY, v)
+  } catch {
+    // ignore localStorage errors (e.g., privacy mode)
+  }
+})
+
 const visibleRange = ref({ start: 0, end: DEFAULT_VISIBLE_RANGE_END })
 
 const visibleAudiobooks = computed(() => {
@@ -2277,7 +2289,6 @@ function handleClickOutside(event: Event) {
 let resizeObserver: ResizeObserver | null = null
 let stopVisibleRangeWatch: (() => void) | null = null
 let stopViewModeWatch: (() => void) | null = null
-let stopPersistViewModeWatch: (() => void) | null = null
 
 async function initializeVirtualScroller() {
   if (!scrollContainer.value) return
@@ -2327,16 +2338,6 @@ async function initializeVirtualScroller() {
       await nextTick()
       syncMeasuredRowHeight()
       updateVisibleRange()
-    })
-  }
-
-  if (!stopPersistViewModeWatch) {
-    stopPersistViewModeWatch = watch(viewMode, (v) => {
-      try {
-        localStorage.setItem(VIEWMODE_KEY, v)
-      } catch {
-        /* ignore */
-      }
     })
   }
 }
@@ -2515,11 +2516,6 @@ onUnmounted(() => {
     stopViewModeWatch?.()
   } catch {}
   stopViewModeWatch = null
-
-  try {
-    stopPersistViewModeWatch?.()
-  } catch {}
-  stopPersistViewModeWatch = null
 
   try {
     authorCardObserver?.disconnect()
